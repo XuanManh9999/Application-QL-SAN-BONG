@@ -1,0 +1,54 @@
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000/api/v1";
+
+const buildHeaders = (token, hasJson = true) => {
+  const headers = {};
+  if (hasJson) headers["Content-Type"] = "application/json";
+  if (token) headers.Authorization = `Bearer ${token}`;
+  return headers;
+};
+
+const request = async (path, { method = "GET", body, token } = {}) => {
+  const res = await fetch(`${API_BASE_URL}${path}`, {
+    method,
+    headers: buildHeaders(token, body !== undefined),
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || data?.success === false) {
+    throw new Error(data?.message || `Request failed: ${res.status}`);
+  }
+
+  return data;
+};
+
+export const api = {
+  auth: {
+    login: (payload) => request("/auth/login", { method: "POST", body: payload }),
+    forgotPassword: (payload) => request("/auth/forgot-password", { method: "POST", body: payload }),
+    me: (token) => request("/users/me", { token }),
+  },
+  venues: {
+    list: (token) => request("/venues", { token }),
+    create: (token, payload) => request("/venues", { method: "POST", token, body: payload }),
+  },
+  pitches: {
+    list: (token, venueId) => request(`/pitches${venueId ? `?venueId=${venueId}` : ""}`, { token }),
+    create: (token, payload) => request("/pitches", { method: "POST", token, body: payload }),
+  },
+  bookings: {
+    list: (token) => request("/bookings", { token }),
+    create: (token, payload) => request("/bookings", { method: "POST", token, body: payload }),
+    updateStatus: (token, id, payload) => request(`/bookings/${id}/status`, { method: "PATCH", token, body: payload }),
+  },
+  promotions: {
+    list: (token) => request("/promotions", { token }),
+    create: (token, payload) => request("/promotions", { method: "POST", token, body: payload }),
+    apply: (token, payload) => request("/promotions/apply", { method: "POST", token, body: payload }),
+  },
+  payments: {
+    createVnpayUrl: (token, payload) => request("/payments/vnpay/create-url", { method: "POST", token, body: payload }),
+  },
+};
+
+export { API_BASE_URL };

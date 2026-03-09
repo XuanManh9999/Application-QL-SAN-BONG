@@ -1,0 +1,80 @@
+# =========================
+# OS / Editor
+# =========================
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*.tmp
+*.bak
+.vscode/
+.idea/
+
+# =========================
+# Logs
+# =========================
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# =========================
+# Environment / secrets
+# =========================
+.env
+.env.*
+!.env.example
+
+# =========================
+# Node.js (root / backend / admin)
+# =========================
+node_modules/
+**/node_modules/
+dist/
+build/
+coverage/
+.nyc_output/
+
+# =========================
+# Backend (Express + Prisma)
+# =========================
+Backend/.env
+Backend/prisma/*.db
+Backend/prisma/*.db-journal
+Backend/prisma/migrations/**/migration_lock.toml
+
+# =========================
+# Frontend (Vite React)
+# =========================
+admin/.env
+admin/.env.*
+!admin/.env.example
+admin/dist/
+
+# =========================
+# Android (AppDatSan)
+# =========================
+AppDatSan/.gradle/
+AppDatSan/local.properties
+AppDatSan/**/build/
+AppDatSan/.idea/
+AppDatSan/.kotlin/
+*.iml
+captures/
+.externalNativeBuild/
+.cxx/
+
+# APK / AAB outputs
+*.apk
+*.aab
+
+# Keystore / signing
+*.jks
+*.keystore
+
+# =========================
+# Cursor / misc
+# =========================
+.cursor/
