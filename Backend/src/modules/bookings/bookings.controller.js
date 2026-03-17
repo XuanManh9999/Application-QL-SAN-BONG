@@ -5,7 +5,7 @@ const { buildBookingCode, isOverlap } = require("../../utils/booking");
 const { validatePromotion } = require("../promotions/promotions.service");
 
 const createBooking = asyncHandler(async (req, res) => {
-  const { pitchId, bookingDate, startTime, endTime, subtotalPrice, promotionCode, note } = req.body;
+  const { pitchId, bookingDate, startTime, endTime, subtotalPrice, promotionCode, note, userId } = req.body;
 
   if (startTime >= endTime) {
     throw new ApiError(400, "startTime must be earlier than endTime");
@@ -59,7 +59,7 @@ const createBooking = asyncHandler(async (req, res) => {
     const created = await tx.booking.create({
       data: {
         bookingCode: buildBookingCode(),
-        userId: req.user.id,
+        userId: userId || req.user.id,
         pitchId,
         bookingDate: date,
         startTime,
@@ -151,8 +151,43 @@ const updateBookingStatus = asyncHandler(async (req, res) => {
   res.json({ success: true, data: updated });
 });
 
+const updateBooking = asyncHandler(async (req, res) => {
+  const existing = await prisma.booking.findUnique({ where: { id: req.params.id } });
+  if (!existing) throw new ApiError(404, "Booking not found");
+
+  const data = { ...req.body };
+  if (data.bookingDate) data.bookingDate = new Date(`${data.bookingDate}T00:00:00.000Z`);
+  if (data.promotionCode) {
+    const promo = await prisma.promotion.findUnique({ where: { code: data.promotionCode.toUpperCase() } });
+    data.promotionId = promo ? promo.id : null;
+    delete data.promotionCode;
+  }
+
+  const updated = await prisma.booking.update({
+    where: { id: req.params.id },
+    data,
+    include: {
+      pitch: { select: { id: true, name: true, venueId: true } },
+      user: { select: { id: true, fullName: true, email: true } },
+      promotion: { select: { id: true, code: true, type: true, value: true } },
+    },
+  });
+
+  res.json({ success: true, data: updated });
+});
+
+const deleteBooking = asyncHandler(async (req, res) => {
+  const existing = await prisma.booking.findUnique({ where: { id: req.params.id } });
+  if (!existing) throw new ApiError(404, "Booking not found");
+
+  await prisma.booking.delete({ where: { id: req.params.id } });
+  res.json({ success: true, data: { id: req.params.id } });
+});
+
 module.exports = {
   createBooking,
   listBookings,
   updateBookingStatus,
+  updateBooking,
+  deleteBooking,
 };

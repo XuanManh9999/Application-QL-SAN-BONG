@@ -11,6 +11,37 @@ const createVnpayPaymentSchema = z.object({
   params: z.object({}),
 });
 
+const createPaymentSchema = z.object({
+  body: z.object({
+    bookingId: z.string().min(5),
+    provider: z.enum(["VNPAY"]).optional(),
+    status: z.enum(["PENDING", "SUCCESS", "FAILED"]).optional(),
+    amount: z.number().positive(),
+    txnRef: z.string().min(6).optional(),
+    providerTxnNo: z.string().optional(),
+    paidAt: z.iso.datetime().optional(),
+  }),
+  query: z.object({}),
+  params: z.object({}),
+});
+
+const updatePaymentSchema = z.object({
+  body: z
+    .object({
+      status: z.enum(["PENDING", "SUCCESS", "FAILED"]).optional(),
+      amount: z.number().positive().optional(),
+      providerTxnNo: z.string().optional(),
+      paidAt: z.iso.datetime().optional().nullable(),
+    })
+    .refine((data) => Object.keys(data).length > 0, {
+      message: "At least one field is required",
+    }),
+  query: z.object({}),
+  params: z.object({ id: z.string().min(5) }),
+});
+
 module.exports = {
   createVnpayPaymentSchema,
+  createPaymentSchema,
+  updatePaymentSchema,
 };

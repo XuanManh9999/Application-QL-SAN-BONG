@@ -72,9 +72,18 @@ const applyPromotion = asyncHandler(async (req, res) => {
   });
 });
 
+const deletePromotion = asyncHandler(async (req, res) => {
+  const existing = await prisma.promotion.findUnique({ where: { id: req.params.id } });
+  if (!existing) throw new ApiError(404, "Promotion not found");
+
+  await prisma.promotion.delete({ where: { id: req.params.id } });
+  res.json({ success: true, data: { id: req.params.id } });
+});
+
 module.exports = {
   listPromotions,
   createPromotion,
   updatePromotion,
   applyPromotion,
+  deletePromotion,
 };

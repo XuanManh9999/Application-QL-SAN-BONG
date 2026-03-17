@@ -9,7 +9,8 @@
     "start": "node src/server.js",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
-    "prisma:seed": "node prisma/seed.js"
+    "prisma:seed": "node prisma/seed.js",
+    "prisma:reset": "prisma migrate reset --force"
   },
   "prisma": {
     "seed": "node prisma/seed.js"
@@ -22,7 +23,7 @@
   ],
   "license": "ISC",
   "dependencies": {
-    "@prisma/client": "^7.4.2",
+    "@prisma/client": "5.22.0",
     "bcryptjs": "^3.0.3",
     "cors": "^2.8.6",
     "dotenv": "^17.3.1",
@@ -35,6 +36,6 @@
   },
   "devDependencies": {
     "nodemon": "^3.1.10",
-    "prisma": "^7.4.2"
+    "prisma": "5.22.0"
   }
 }

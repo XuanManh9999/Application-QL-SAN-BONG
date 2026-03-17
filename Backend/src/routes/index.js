@@ -7,6 +7,7 @@ const pitchRoutes = require("../modules/pitches/pitches.route");
 const bookingRoutes = require("../modules/bookings/bookings.route");
 const promotionRoutes = require("../modules/promotions/promotions.route");
 const paymentRoutes = require("../modules/payments/payments.route");
+const articleRoutes = require("../modules/articles/articles.route");
 
 const router = express.Router();
 
@@ -21,5 +22,6 @@ router.use("/pitches", pitchRoutes);
 router.use("/bookings", bookingRoutes);
 router.use("/promotions", promotionRoutes);
 router.use("/payments", paymentRoutes);
+router.use("/articles", articleRoutes);
 
 module.exports = router;

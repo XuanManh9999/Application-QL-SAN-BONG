@@ -1,0 +1,2 @@
+ALTER TABLE `RefreshToken`
+  MODIFY `token` VARCHAR(1024) NOT NULL;

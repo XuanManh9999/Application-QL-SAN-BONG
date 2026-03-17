@@ -62,9 +62,18 @@ const updatePitch = asyncHandler(async (req, res) => {
   res.json({ success: true, data: updated });
 });
 
+const deletePitch = asyncHandler(async (req, res) => {
+  const existing = await prisma.pitch.findUnique({ where: { id: req.params.id } });
+  if (!existing) throw new ApiError(404, "Pitch not found");
+
+  await prisma.pitch.delete({ where: { id: req.params.id } });
+  res.json({ success: true, data: { id: req.params.id } });
+});
+
 module.exports = {
   createPitch,
   listPitches,
   getPitchById,
   updatePitch,
+  deletePitch,
 };

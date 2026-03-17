@@ -47,9 +47,18 @@ const updateVenue = asyncHandler(async (req, res) => {
   res.json({ success: true, data: updated });
 });
 
+const deleteVenue = asyncHandler(async (req, res) => {
+  const existing = await prisma.venue.findUnique({ where: { id: req.params.id } });
+  if (!existing) throw new ApiError(404, "Venue not found");
+
+  await prisma.venue.delete({ where: { id: req.params.id } });
+  res.json({ success: true, data: { id: req.params.id } });
+});
+
 module.exports = {
   createVenue,
   listVenues,
   getVenueById,
   updateVenue,
+  deleteVenue,
 };
