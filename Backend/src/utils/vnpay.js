@@ -9,8 +9,13 @@ const sortObject = (obj) => {
   return sorted;
 };
 
-// Encode VALUE only (VNPay hash rules), then replace %20 -> +
-const encodeVnpayValue = (value) => encodeURIComponent(String(value)).replace(/%20/g, "+");
+// Encode value like Python urllib.parse.quote(value, safe='') then replace %20 -> +
+// Note: encodeURIComponent does NOT encode !'()* which Python quote(safe='') WILL encode.
+// VNPay hash rules are sensitive to this.
+const encodeVnpayValue = (value) =>
+  encodeURIComponent(String(value))
+    .replace(/[!'()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`)
+    .replace(/%20/g, "+");
 
 /**
  * Build hash data string for VNPay:
