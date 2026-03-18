@@ -41,7 +41,14 @@ export const api = {
     remove: (token, id) => request(`/pitches/${id}`, { method: "DELETE", token }),
   },
   bookings: {
-    list: (token) => request("/bookings", { token }),
+    list: (token, query) => {
+      const qs = query
+        ? `?${new URLSearchParams(
+            Object.entries(query).filter(([, v]) => v !== undefined && v !== null && String(v) !== "")
+          ).toString()}`
+        : "";
+      return request(`/bookings${qs}`, { token });
+    },
     create: (token, payload) => request("/bookings", { method: "POST", token, body: payload }),
     updateStatus: (token, id, payload) => request(`/bookings/${id}/status`, { method: "PATCH", token, body: payload }),
     update: (token, id, payload) => request(`/bookings/${id}`, { method: "PATCH", token, body: payload }),

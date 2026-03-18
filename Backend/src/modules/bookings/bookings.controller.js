@@ -140,6 +140,21 @@ const updateBookingStatus = asyncHandler(async (req, res) => {
   const existing = await prisma.booking.findUnique({ where: { id: req.params.id } });
   if (!existing) throw new ApiError(404, "Booking not found");
 
+  // Prevent confirming/pending an overlapping booking (server-side guarantee).
+  if (["PENDING", "CONFIRMED"].includes(req.body.status)) {
+    const others = await prisma.booking.findMany({
+      where: {
+        id: { not: existing.id },
+        pitchId: existing.pitchId,
+        bookingDate: existing.bookingDate,
+        status: { in: ["PENDING", "CONFIRMED"] },
+      },
+      select: { startTime: true, endTime: true },
+    });
+    const hasConflict = others.some((b) => isOverlap(existing.startTime, existing.endTime, b.startTime, b.endTime));
+    if (hasConflict) throw new ApiError(409, "Time slot already booked");
+  }
+
   const updated = await prisma.booking.update({
     where: { id: req.params.id },
     data: {
@@ -161,6 +176,31 @@ const updateBooking = asyncHandler(async (req, res) => {
     const promo = await prisma.promotion.findUnique({ where: { code: data.promotionCode.toUpperCase() } });
     data.promotionId = promo ? promo.id : null;
     delete data.promotionCode;
+  }
+
+  // Server-side overlap protection when changing time/date/pitch and the booking is (or becomes) active.
+  const nextPitchId = data.pitchId || existing.pitchId;
+  const nextBookingDate = data.bookingDate || existing.bookingDate;
+  const nextStartTime = data.startTime || existing.startTime;
+  const nextEndTime = data.endTime || existing.endTime;
+  const nextStatus = data.status || existing.status;
+
+  if (nextStartTime >= nextEndTime) {
+    throw new ApiError(400, "startTime must be earlier than endTime");
+  }
+
+  if (["PENDING", "CONFIRMED"].includes(nextStatus)) {
+    const others = await prisma.booking.findMany({
+      where: {
+        id: { not: existing.id },
+        pitchId: nextPitchId,
+        bookingDate: nextBookingDate,
+        status: { in: ["PENDING", "CONFIRMED"] },
+      },
+      select: { startTime: true, endTime: true },
+    });
+    const hasConflict = others.some((b) => isOverlap(nextStartTime, nextEndTime, b.startTime, b.endTime));
+    if (hasConflict) throw new ApiError(409, "Time slot already booked");
   }
 
   const updated = await prisma.booking.update({

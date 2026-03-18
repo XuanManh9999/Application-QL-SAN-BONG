@@ -71,6 +71,42 @@ async function main() {
     },
   });
 
+  const customer2 = await prisma.user.upsert({
+    where: { email: "vy.nguyen@football.local" },
+    update: {
+      fullName: "Vy Nguyễn",
+      role: Role.CUSTOMER,
+      isActive: true,
+      phone: "0909000222",
+    },
+    create: {
+      fullName: "Vy Nguyễn",
+      email: "vy.nguyen@football.local",
+      passwordHash,
+      role: Role.CUSTOMER,
+      isActive: true,
+      phone: "0909000222",
+    },
+  });
+
+  const customer3 = await prisma.user.upsert({
+    where: { email: "khoa.tran@football.local" },
+    update: {
+      fullName: "Khoa Trần",
+      role: Role.CUSTOMER,
+      isActive: true,
+      phone: "0909000333",
+    },
+    create: {
+      fullName: "Khoa Trần",
+      email: "khoa.tran@football.local",
+      passwordHash,
+      role: Role.CUSTOMER,
+      isActive: true,
+      phone: "0909000333",
+    },
+  });
+
   const venue1 = await prisma.venue.upsert({
     where: { id: "venue-hcm-1" },
     update: {},
@@ -95,6 +131,20 @@ async function main() {
       description: "Cụm sân cho giải phong trào và huấn luyện",
       openTime: "05:30",
       closeTime: "22:30",
+      status: "ACTIVE",
+    },
+  });
+
+  const venue3 = await prisma.venue.upsert({
+    where: { id: "venue-hn-1" },
+    update: {},
+    create: {
+      id: "venue-hn-1",
+      name: "Sân bóng Cầu Giấy",
+      address: "88 Trần Thái Tông, Cầu Giấy, Hà Nội",
+      description: "Cụm sân trung tâm, có phòng thay đồ và thuê áo bib",
+      openTime: "06:00",
+      closeTime: "23:30",
       status: "ACTIVE",
     },
   });
@@ -134,6 +184,45 @@ async function main() {
       name: "Q7-01",
       pitchType: "Sân 5",
       basePrice: new Prisma.Decimal(280000),
+      status: "ACTIVE",
+    },
+  });
+
+  await prisma.pitch.upsert({
+    where: { id: "pitch-q7-2" },
+    update: {},
+    create: {
+      id: "pitch-q7-2",
+      venueId: venue2.id,
+      name: "Q7-02",
+      pitchType: "Sân 7",
+      basePrice: new Prisma.Decimal(420000),
+      status: "ACTIVE",
+    },
+  });
+
+  await prisma.pitch.upsert({
+    where: { id: "pitch-cg-1" },
+    update: {},
+    create: {
+      id: "pitch-cg-1",
+      venueId: venue3.id,
+      name: "CG-01",
+      pitchType: "Sân 5",
+      basePrice: new Prisma.Decimal(320000),
+      status: "ACTIVE",
+    },
+  });
+
+  await prisma.pitch.upsert({
+    where: { id: "pitch-cg-2" },
+    update: {},
+    create: {
+      id: "pitch-cg-2",
+      venueId: venue3.id,
+      name: "CG-02",
+      pitchType: "Sân 7",
+      basePrice: new Prisma.Decimal(500000),
       status: "ACTIVE",
     },
   });
@@ -215,6 +304,46 @@ async function main() {
     },
   });
 
+  const booking3 = await prisma.booking.upsert({
+    where: { id: "booking-3" },
+    update: {},
+    create: {
+      id: "booking-3",
+      bookingCode: "BK-0003",
+      userId: customer2.id,
+      pitchId: pitch2.id,
+      bookingDate: new Date(`${new Date(Date.now() - 86400000).toISOString().slice(0, 10)}T00:00:00.000Z`),
+      startTime: "19:00",
+      endTime: "20:30",
+      subtotalPrice: new Prisma.Decimal(450000),
+      discountAmount: new Prisma.Decimal(0),
+      totalPrice: new Prisma.Decimal(450000),
+      note: "Đã đá xong, chờ đối soát",
+      status: "COMPLETED",
+      paymentStatus: "PAID",
+    },
+  });
+
+  const booking4 = await prisma.booking.upsert({
+    where: { id: "booking-4" },
+    update: {},
+    create: {
+      id: "booking-4",
+      bookingCode: "BK-0004",
+      userId: customer3.id,
+      pitchId: pitch1.id,
+      bookingDate: new Date(`${new Date(Date.now() + 86400000 * 3).toISOString().slice(0, 10)}T00:00:00.000Z`),
+      startTime: "17:00",
+      endTime: "18:30",
+      subtotalPrice: new Prisma.Decimal(300000),
+      discountAmount: new Prisma.Decimal(0),
+      totalPrice: new Prisma.Decimal(300000),
+      note: "Đặt trước 3 ngày",
+      status: "CONFIRMED",
+      paymentStatus: "UNPAID",
+    },
+  });
+
   await prisma.paymentTransaction.upsert({
     where: { id: "payment-1" },
     update: {},
@@ -227,6 +356,21 @@ async function main() {
       txnRef: "TXN-0001",
       providerTxnNo: "VNP-20260316-0001",
       paidAt: new Date(),
+    },
+  });
+
+  await prisma.paymentTransaction.upsert({
+    where: { id: "payment-2" },
+    update: {},
+    create: {
+      id: "payment-2",
+      bookingId: booking3.id,
+      provider: "VNPAY",
+      status: "SUCCESS",
+      amount: new Prisma.Decimal(450000),
+      txnRef: "TXN-0002",
+      providerTxnNo: "VNP-20260316-0002",
+      paidAt: new Date(Date.now() - 3600 * 1000 * 12),
     },
   });
 
@@ -246,6 +390,38 @@ async function main() {
   });
 
   await prisma.article.upsert({
+    where: { slug: "bang-gia-san-va-khung-gio" },
+    update: {},
+    create: {
+      title: "Bảng giá sân theo khung giờ (cập nhật 2026)",
+      slug: "bang-gia-san-va-khung-gio",
+      summary: "Tổng hợp giá sân 5/7 theo giờ vàng, cuối tuần và ngày thường.",
+      content:
+        "<h2>Khung giờ phổ biến</h2><ul><li><strong>06:00 - 16:59</strong>: giá tiêu chuẩn</li><li><strong>17:00 - 22:00</strong>: giờ vàng</li></ul><blockquote>Lưu ý: giá có thể thay đổi theo giải đấu/đặt theo gói.</blockquote><h3>Mẹo tiết kiệm</h3><ol><li>Đặt theo nhóm để nhận ưu đãi</li><li>Sử dụng mã giảm giá cuối tuần</li></ol>",
+      coverUrl: "https://images.unsplash.com/photo-1508098682722-e99c43a406b2",
+      status: ArticleStatus.PUBLISHED,
+      authorId: admin.id,
+      publishedAt: new Date(Date.now() - 86400000 * 5),
+    },
+  });
+
+  await prisma.article.upsert({
+    where: { slug: "kinh-nghiem-chon-giay-da-bong" },
+    update: {},
+    create: {
+      title: "Kinh nghiệm chọn giày đá bóng sân cỏ nhân tạo",
+      slug: "kinh-nghiem-chon-giay-da-bong",
+      summary: "Chọn đinh TF/AG, form giày và mẹo bảo quản để đá bền hơn.",
+      content:
+        "<h2>Chọn đinh giày</h2><p>Sân cỏ nhân tạo phù hợp nhất với <strong>TF</strong> (đinh dăm) và một số loại <strong>AG</strong>.</p><h3>Checklist nhanh</h3><ul><li>Form vừa chân</li><li>Đế bám tốt</li><li>Vớ dày vừa đủ</li></ul><pre><code>// Gợi ý: lau sạch đế sau mỗi trận\n</code></pre>",
+      coverUrl: "https://images.unsplash.com/photo-1521412644187-c49fa049e84d",
+      status: ArticleStatus.PUBLISHED,
+      authorId: owner.id,
+      publishedAt: new Date(Date.now() - 86400000 * 1),
+    },
+  });
+
+  await prisma.article.upsert({
     where: { slug: "huong-dan-dat-san" },
     update: {},
     create: {
@@ -260,7 +436,7 @@ async function main() {
     },
   });
 
-  console.log("Seeded admin + sample data (venues, pitches, promotions, bookings, payments, articles)");
+  console.log("Seeded admin + extended sample data (venues, pitches, promotions, bookings, payments, articles, users)");
 }
 
 main()

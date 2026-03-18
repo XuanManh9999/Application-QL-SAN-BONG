@@ -11,6 +11,5 @@ router.get("/:id", protect, controller.getPitchById);
 router.post("/", protect, authorize("SUPER_ADMIN", "OWNER", "STAFF"), validate(createPitchSchema), controller.createPitch);
 router.patch("/:id", protect, authorize("SUPER_ADMIN", "OWNER", "STAFF"), validate(updatePitchSchema), controller.updatePitch);
 router.delete("/:id", protect, authorize("SUPER_ADMIN", "OWNER"), controller.deletePitch);
-router.delete("/:id", protect, authorize("SUPER_ADMIN", "OWNER"), controller.deletePitch);
 
 module.exports = router;

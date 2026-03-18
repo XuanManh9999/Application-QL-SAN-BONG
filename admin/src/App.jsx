@@ -1,4 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Quill from "quill";
+import "quill/dist/quill.snow.css";
+import * as echarts from "echarts";
 import "./App.css";
 import { api } from "./api";
 
@@ -6,6 +9,7 @@ const tabs = [
   { key: "dashboard", label: "Tổng quan" },
   { key: "venues", label: "Cụm sân" },
   { key: "pitches", label: "Sân con" },
+  { key: "schedule", label: "Lịch sân" },
   { key: "bookings", label: "Đặt sân" },
   { key: "promotions", label: "Mã giảm giá" },
   { key: "payments", label: "Thanh toán" },
@@ -23,6 +27,104 @@ const getStoredAuth = () => {
 };
 
 const formatMoney = (v) => `${Number(v || 0).toLocaleString("vi-VN")} đ`;
+
+const isBlank = (v) => String(v ?? "").trim().length === 0;
+const requireField = (value, message) => {
+  if (isBlank(value)) throw new Error(message);
+};
+const requirePositiveNumber = (value, message) => {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) throw new Error(message);
+};
+
+const toDateInput = (d) => new Date(d).toISOString().slice(0, 10);
+const pad2 = (n) => String(n).padStart(2, "0");
+const timeToMinutes = (t) => {
+  const [hh, mm] = String(t || "00:00").split(":").map((x) => Number(x));
+  return (Number.isFinite(hh) ? hh : 0) * 60 + (Number.isFinite(mm) ? mm : 0);
+};
+const minutesToTime = (m) => `${pad2(Math.floor(m / 60))}:${pad2(m % 60)}`;
+const isOverlapTime = (aStart, aEnd, bStart, bEnd) => {
+  const as = timeToMinutes(aStart);
+  const ae = timeToMinutes(aEnd);
+  const bs = timeToMinutes(bStart);
+  const be = timeToMinutes(bEnd);
+  return Math.max(as, bs) < Math.min(ae, be);
+};
+
+function RichTextEditor({ value, onChange, placeholder }) {
+  const hostRef = useRef(null);
+  const quillRef = useRef(null);
+  const lastValueRef = useRef(value || "");
+
+  useEffect(() => {
+    if (!hostRef.current || quillRef.current) return;
+
+    const q = new Quill(hostRef.current, {
+      theme: "snow",
+      placeholder: placeholder || "Viết nội dung...",
+      modules: {
+        toolbar: [
+          [{ header: [1, 2, 3, false] }],
+          ["bold", "italic", "underline", "strike"],
+          [{ color: [] }, { background: [] }],
+          [{ align: [] }],
+          [{ list: "ordered" }, { list: "bullet" }],
+          ["blockquote", "code-block"],
+          ["link"],
+          ["clean"],
+        ],
+      },
+    });
+
+    q.on("text-change", () => {
+      const html = q.root.innerHTML;
+      lastValueRef.current = html;
+      onChange?.(html);
+    });
+
+    if (value) q.root.innerHTML = value;
+    quillRef.current = q;
+  }, [onChange, placeholder, value]);
+
+  useEffect(() => {
+    const q = quillRef.current;
+    if (!q) return;
+    const next = value || "";
+    if (next === lastValueRef.current) return;
+    q.root.innerHTML = next;
+    lastValueRef.current = next;
+  }, [value]);
+
+  return <div className="rte" ref={hostRef} />;
+}
+
+function EChart({ option, height = 320 }) {
+  const hostRef = useRef(null);
+  const chartRef = useRef(null);
+
+  useEffect(() => {
+    if (!hostRef.current) return;
+    const chart = echarts.init(hostRef.current, undefined, { renderer: "canvas" });
+    chartRef.current = chart;
+
+    const onResize = () => chart.resize();
+    window.addEventListener("resize", onResize);
+
+    return () => {
+      window.removeEventListener("resize", onResize);
+      chart.dispose();
+      chartRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!chartRef.current) return;
+    chartRef.current.setOption(option || {}, { notMerge: true, lazyUpdate: true });
+  }, [option]);
+
+  return <div className="chart" ref={hostRef} style={{ height }} />;
+}
 
 function App() {
   const [auth, setAuth] = useState(getStoredAuth());
@@ -59,15 +161,15 @@ function App() {
     localStorage.setItem("admin_auth", JSON.stringify(auth));
   }, [auth]);
 
-  const pushToast = (payload) => {
+  const pushToast = useCallback((payload) => {
     const id = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
     setToasts((prev) => [{ id, ...payload }, ...prev]);
     setTimeout(() => {
       setToasts((prev) => prev.filter((item) => item.id !== id));
     }, payload.duration || 3200);
-  };
+  }, []);
 
-  const callWithToast = async (fn, successText) => {
+  const callWithToast = useCallback(async (fn, successText) => {
     try {
       setLoading(true);
       await fn();
@@ -77,13 +179,13 @@ function App() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [pushToast]);
 
-  const loadAll = async () => {
+  const loadAll = useCallback(async () => {
     if (!token) return;
 
     await callWithToast(async () => {
-      const [v, p, b, promo, pay, u, art] = await Promise.all([
+      const results = await Promise.allSettled([
         api.venues.list(token),
         api.pitches.list(token),
         api.bookings.list(token),
@@ -92,19 +194,35 @@ function App() {
         api.users.list(token),
         api.articles.list(token),
       ]);
-      setVenues(v.data || []);
-      setPitches(p.data || []);
-      setBookings(b.data || []);
-      setPromotions(promo.data || []);
-      setPayments(pay.data || []);
-      setUsers(u.data || []);
-      setArticles(art.data || []);
+
+      const names = ["cụm sân", "sân con", "booking", "khuyến mãi", "thanh toán", "người dùng", "bài viết"];
+      const [v, p, b, promo, pay, u, art] = results;
+
+      if (v.status === "fulfilled") setVenues(v.value.data || []);
+      if (p.status === "fulfilled") setPitches(p.value.data || []);
+      if (b.status === "fulfilled") setBookings(b.value.data || []);
+      if (promo.status === "fulfilled") setPromotions(promo.value.data || []);
+      if (pay.status === "fulfilled") setPayments(pay.value.data || []);
+      if (u.status === "fulfilled") setUsers(u.value.data || []);
+      if (art.status === "fulfilled") setArticles(art.value.data || []);
+
+      const failed = results
+        .map((r, i) => (r.status === "rejected" ? `${names[i]}: ${r.reason?.message || "lỗi"}` : null))
+        .filter(Boolean);
+      if (failed.length) {
+        pushToast({
+          type: "error",
+          title: "Một số dữ liệu chưa tải được",
+          message: failed.join(" • "),
+          duration: 5200,
+        });
+      }
     }, "Đã đồng bộ dữ liệu mới nhất");
-  };
+  }, [callWithToast, pushToast, token]);
 
   useEffect(() => {
     if (token) loadAll();
-  }, [token]);
+  }, [loadAll, token]);
 
   const handleLogout = () => {
     setAuth(null);
@@ -169,9 +287,22 @@ function App() {
 
         <ToastStack toasts={toasts} onClose={(id) => setToasts((prev) => prev.filter((t) => t.id !== id))} />
 
-        {activeTab === "dashboard" && <Dashboard stats={stats} />}
+        {activeTab === "dashboard" && (
+          <Dashboard stats={stats} bookings={bookings} venues={venues} pitches={pitches} payments={payments} />
+        )}
         {activeTab === "venues" && <VenuesPanel token={token} venues={venues} setVenues={setVenues} pushToast={pushToast} />}
         {activeTab === "pitches" && <PitchesPanel token={token} pitches={pitches} setPitches={setPitches} venues={venues} pushToast={pushToast} />}
+        {activeTab === "schedule" && (
+          <SchedulePanel
+            token={token}
+            venues={venues}
+            pitches={pitches}
+            users={users}
+            promotions={promotions}
+            setBookings={setBookings}
+            pushToast={pushToast}
+          />
+        )}
         {activeTab === "bookings" && <BookingsPanel token={token} bookings={bookings} setBookings={setBookings} pitches={pitches} users={users} promotions={promotions} pushToast={pushToast} />}
         {activeTab === "promotions" && <PromotionsPanel token={token} promotions={promotions} setPromotions={setPromotions} pushToast={pushToast} />}
         {activeTab === "payments" && <PaymentsPanel token={token} bookings={bookings} payments={payments} setPayments={setPayments} pushToast={pushToast} />}
@@ -181,8 +312,6 @@ function App() {
     </div>
   );
 }
-
-export default App;
 
 export default App;
 
@@ -241,16 +370,222 @@ function LoginScreen({ onLogin, pushToast, setLoading, loading }) {
   );
 }
 
-function Dashboard({ stats }) {
+function Dashboard({ stats, bookings, venues, pitches, payments }) {
+  const kpis = [
+    { title: "Cụm sân", value: stats.venueCount },
+    { title: "Sân con", value: stats.pitchCount },
+    { title: "Booking", value: stats.bookingCount },
+    { title: "Mã giảm giá", value: stats.promoCount },
+    { title: "Người dùng", value: stats.userCount },
+    { title: "Bài viết", value: stats.articleCount },
+  ];
+
+  const pitchToVenue = useMemo(() => {
+    const m = new Map();
+    for (const p of pitches || []) m.set(p.id, p.venueId);
+    return m;
+  }, [pitches]);
+
+  const venueName = useMemo(() => {
+    const m = new Map();
+    for (const v of venues || []) m.set(v.id, v.name);
+    return m;
+  }, [venues]);
+
+  const revenueByDay = useMemo(() => {
+    const days = 14;
+    const labels = [];
+    const totals = new Array(days).fill(0);
+    const start = new Date();
+    start.setHours(0, 0, 0, 0);
+    start.setDate(start.getDate() - (days - 1));
+    for (let i = 0; i < days; i++) {
+      const d = new Date(start);
+      d.setDate(start.getDate() + i);
+      labels.push(d.toISOString().slice(0, 10));
+    }
+    const idx = (iso) => labels.indexOf(iso);
+    for (const b of bookings || []) {
+      const iso = new Date(b.bookingDate).toISOString().slice(0, 10);
+      const i = idx(iso);
+      if (i >= 0) totals[i] += Number(b.totalPrice || 0);
+    }
+    return { labels, totals };
+  }, [bookings]);
+
+  const bookingStatus = useMemo(() => {
+    const map = new Map([
+      ["PENDING", 0],
+      ["CONFIRMED", 0],
+      ["CANCELLED", 0],
+      ["COMPLETED", 0],
+    ]);
+    for (const b of bookings || []) map.set(b.status, (map.get(b.status) || 0) + 1);
+    return Array.from(map.entries()).map(([name, value]) => ({ name, value }));
+  }, [bookings]);
+
+  const paymentStatus = useMemo(() => {
+    const map = new Map([
+      ["PENDING", 0],
+      ["SUCCESS", 0],
+      ["FAILED", 0],
+    ]);
+    for (const p of payments || []) map.set(p.status, (map.get(p.status) || 0) + 1);
+    return Array.from(map.entries()).map(([name, value]) => ({ name, value }));
+  }, [payments]);
+
+  const revenueByVenue = useMemo(() => {
+    const map = new Map();
+    for (const b of bookings || []) {
+      const venueId = pitchToVenue.get(b.pitchId) || b.pitch?.venueId;
+      const key = venueId || "unknown";
+      map.set(key, (map.get(key) || 0) + Number(b.totalPrice || 0));
+    }
+    const arr = Array.from(map.entries())
+      .map(([venueId, value]) => ({
+        name: venueId === "unknown" ? "Khác" : venueName.get(venueId) || venueId,
+        value,
+      }))
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 8);
+    return arr;
+  }, [bookings, pitchToVenue, venueName]);
+
+  const baseTheme = useMemo(
+    () => ({
+      textStyle: { fontFamily: "Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif" },
+      tooltip: { trigger: "axis" },
+      grid: { left: 42, right: 18, top: 40, bottom: 36 },
+    }),
+    []
+  );
+
+  const optRevenueLine = useMemo(
+    () => ({
+      ...baseTheme,
+      title: { text: "Doanh thu 14 ngày gần nhất", left: 12, top: 10, textStyle: { fontSize: 13, fontWeight: 700 } },
+      xAxis: {
+        type: "category",
+        data: revenueByDay.labels.map((d) => d.slice(5).replace("-", "/")),
+        axisTick: { show: false },
+        axisLine: { lineStyle: { color: "#e2e8f0" } },
+        axisLabel: { color: "#64748b" },
+      },
+      yAxis: {
+        type: "value",
+        axisLine: { show: false },
+        splitLine: { lineStyle: { color: "rgba(226,232,240,0.8)" } },
+        axisLabel: { color: "#64748b" },
+      },
+      series: [
+        {
+          type: "line",
+          data: revenueByDay.totals,
+          smooth: true,
+          showSymbol: false,
+          lineStyle: { width: 3, color: "#2563eb" },
+          areaStyle: { color: "rgba(37,99,235,0.14)" },
+        },
+      ],
+    }),
+    [revenueByDay, baseTheme]
+  );
+
+  const optBookingPie = useMemo(
+    () => ({
+      textStyle: baseTheme.textStyle,
+      title: { text: "Booking theo trạng thái", left: 12, top: 10, textStyle: { fontSize: 13, fontWeight: 700 } },
+      tooltip: { trigger: "item" },
+      legend: { bottom: 10, left: "center", textStyle: { color: "#64748b" } },
+      series: [
+        {
+          type: "pie",
+          radius: ["40%", "70%"],
+          avoidLabelOverlap: true,
+          itemStyle: { borderRadius: 10, borderColor: "#fff", borderWidth: 2 },
+          label: { show: false },
+          emphasis: { label: { show: true, fontWeight: 700 } },
+          data: bookingStatus,
+          color: ["#f59e0b", "#22c55e", "#ef4444", "#6366f1"],
+        },
+      ],
+    }),
+    [bookingStatus, baseTheme.textStyle]
+  );
+
+  const optRevenueVenue = useMemo(
+    () => ({
+      ...baseTheme,
+      title: { text: "Doanh thu theo cụm sân (Top 8)", left: 12, top: 10, textStyle: { fontSize: 13, fontWeight: 700 } },
+      xAxis: {
+        type: "category",
+        data: revenueByVenue.map((x) => x.name),
+        axisTick: { show: false },
+        axisLine: { lineStyle: { color: "#e2e8f0" } },
+        axisLabel: { color: "#64748b", rotate: 18 },
+      },
+      yAxis: {
+        type: "value",
+        axisLine: { show: false },
+        splitLine: { lineStyle: { color: "rgba(226,232,240,0.8)" } },
+        axisLabel: { color: "#64748b" },
+      },
+      series: [
+        {
+          type: "bar",
+          data: revenueByVenue.map((x) => x.value),
+          barWidth: 18,
+          itemStyle: { borderRadius: [8, 8, 0, 0], color: "#0ea5e9" },
+        },
+      ],
+    }),
+    [revenueByVenue, baseTheme]
+  );
+
+  const optPaymentPie = useMemo(
+    () => ({
+      textStyle: baseTheme.textStyle,
+      title: { text: "Giao dịch theo trạng thái", left: 12, top: 10, textStyle: { fontSize: 13, fontWeight: 700 } },
+      tooltip: { trigger: "item" },
+      legend: { bottom: 10, left: "center", textStyle: { color: "#64748b" } },
+      series: [
+        {
+          type: "pie",
+          radius: ["40%", "70%"],
+          itemStyle: { borderRadius: 10, borderColor: "#fff", borderWidth: 2 },
+          label: { show: false },
+          emphasis: { label: { show: true, fontWeight: 700 } },
+          data: paymentStatus,
+          color: ["#94a3b8", "#22c55e", "#ef4444"],
+        },
+      ],
+    }),
+    [paymentStatus, baseTheme.textStyle]
+  );
+
   return (
-    <section className="grid cards-4">
-      <StatCard title="Cụm sân" value={stats.venueCount} />
-      <StatCard title="Sân con" value={stats.pitchCount} />
-      <StatCard title="Booking" value={stats.bookingCount} />
-      <StatCard title="Mã giảm giá" value={stats.promoCount} />
-      <StatCard title="Người dùng" value={stats.userCount} />
-      <StatCard title="Bài viết" value={stats.articleCount} />
-      <StatCard title="Doanh thu tạm tính" value={formatMoney(stats.revenue)} full />
+    <section className="dashboard">
+      <div className="kpi-grid">
+        {kpis.map((k) => (
+          <StatCard key={k.title} title={k.title} value={k.value} />
+        ))}
+        <StatCard title="Doanh thu tạm tính" value={formatMoney(stats.revenue)} full />
+      </div>
+
+      <div className="charts-grid">
+        <div className="card chart-card span-2">
+          <EChart option={optRevenueLine} height={320} />
+        </div>
+        <div className="card chart-card">
+          <EChart option={optBookingPie} height={320} />
+        </div>
+        <div className="card chart-card span-2">
+          <EChart option={optRevenueVenue} height={320} />
+        </div>
+        <div className="card chart-card">
+          <EChart option={optPaymentPie} height={320} />
+        </div>
+      </div>
     </section>
   );
 }
@@ -281,6 +616,10 @@ function VenuesPanel({ token, venues, setVenues, pushToast }) {
   const submit = async (e) => {
     e.preventDefault();
     try {
+      requireField(form.name, "Vui lòng nhập tên cụm sân");
+      requireField(form.address, "Vui lòng nhập địa chỉ");
+      requireField(form.openTime, "Vui lòng nhập giờ mở");
+      requireField(form.closeTime, "Vui lòng nhập giờ đóng");
       if (form.id) {
         const res = await api.venues.update(token, form.id, {
           name: form.name,
@@ -355,21 +694,25 @@ function VenuesPanel({ token, venues, setVenues, pushToast }) {
                   <td>{v.openTime} - {v.closeTime}</td>
                   <td><StatusBadge status={v.status} /></td>
                   <td>
-                    <button
-                      className="small-btn ghost-btn"
-                      onClick={() => setForm({
-                        name: v.name,
-                        address: v.address,
-                        description: v.description || "",
-                        openTime: v.openTime,
-                        closeTime: v.closeTime,
-                        status: v.status,
-                        id: v.id,
-                      })}
-                    >
-                      Sửa
-                    </button>
-                    <button className="small-btn danger" onClick={() => handleDelete(v.id)}>Xoá</button>
+                    <div className="actions-cell">
+                      <button
+                        className="small-btn ghost-btn"
+                        onClick={() =>
+                          setForm({
+                            name: v.name,
+                            address: v.address,
+                            description: v.description || "",
+                            openTime: v.openTime,
+                            closeTime: v.closeTime,
+                            status: v.status,
+                            id: v.id,
+                          })
+                        }
+                      >
+                        Sửa
+                      </button>
+                      <button className="small-btn danger" onClick={() => handleDelete(v.id)}>Xoá</button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -398,7 +741,12 @@ function UsersPanel({ token, users, setUsers, pushToast }) {
   const submit = async (e) => {
     e.preventDefault();
     try {
+      requireField(form.fullName, "Vui lòng nhập họ tên");
+      requireField(form.email, "Vui lòng nhập email");
       if (form.id) {
+        if (form.password && String(form.password).length < 8) {
+          throw new Error("Mật khẩu phải có ít nhất 8 ký tự");
+        }
         const payload = {
           fullName: form.fullName,
           email: form.email,
@@ -411,11 +759,13 @@ function UsersPanel({ token, users, setUsers, pushToast }) {
         setUsers((prev) => prev.map((u) => (u.id === form.id ? res.data : u)));
         pushToast({ type: "success", title: "Đã cập nhật", message: "Người dùng đã được lưu" });
       } else {
+        const pwd = form.password || "Password@123";
+        if (String(pwd).length < 8) throw new Error("Mật khẩu phải có ít nhất 8 ký tự");
         const res = await api.users.create(token, {
           fullName: form.fullName,
           email: form.email,
           phone: form.phone || undefined,
-          password: form.password || "Password@123",
+          password: pwd,
           role: form.role,
           isActive: form.isActive,
         });
@@ -486,23 +836,25 @@ function UsersPanel({ token, users, setUsers, pushToast }) {
                   <td>{u.role}</td>
                   <td>{u.isActive ? "ACTIVE" : "INACTIVE"}</td>
                   <td>
-                    <button
-                      className="small-btn ghost-btn"
-                      onClick={() =>
-                        setForm({
-                          id: u.id,
-                          fullName: u.fullName,
-                          email: u.email,
-                          phone: u.phone || "",
-                          password: "",
-                          role: u.role,
-                          isActive: u.isActive,
-                        })
-                      }
-                    >
-                      Sửa
-                    </button>
-                    <button className="small-btn danger" onClick={() => handleDelete(u.id)}>Xoá</button>
+                    <div className="actions-cell">
+                      <button
+                        className="small-btn ghost-btn"
+                        onClick={() =>
+                          setForm({
+                            id: u.id,
+                            fullName: u.fullName,
+                            email: u.email,
+                            phone: u.phone || "",
+                            password: "",
+                            role: u.role,
+                            isActive: u.isActive,
+                          })
+                        }
+                      >
+                        Sửa
+                      </button>
+                      <button className="small-btn danger" onClick={() => handleDelete(u.id)}>Xoá</button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -526,12 +878,19 @@ function ArticlesPanel({ token, articles, setArticles, users, pushToast }) {
     authorId: "",
     publishedAt: "",
   });
-
   const resetForm = () =>
     setForm({ id: "", title: "", slug: "", summary: "", content: "", coverUrl: "", status: "DRAFT", authorId: "", publishedAt: "" });
 
   const submit = async (e) => {
     e.preventDefault();
+    try {
+      requireField(form.title, "Vui lòng nhập tiêu đề");
+      requireField(form.slug, "Vui lòng nhập slug");
+      requireField(form.content, "Vui lòng nhập nội dung");
+    } catch (error) {
+      pushToast({ type: "error", title: "Không thể lưu", message: error.message || "Vui lòng kiểm tra lại" });
+      return;
+    }
     const payload = {
       title: form.title,
       slug: form.slug,
@@ -579,8 +938,13 @@ function ArticlesPanel({ token, articles, setArticles, users, pushToast }) {
         <input value={form.slug} onChange={(e) => setForm({ ...form, slug: e.target.value })} />
         <label>Tóm tắt</label>
         <input value={form.summary} onChange={(e) => setForm({ ...form, summary: e.target.value })} />
-        <label>Nội dung</label>
-        <textarea rows="6" value={form.content} onChange={(e) => setForm({ ...form, content: e.target.value })} />
+        <label>Nội dung (Rich text)</label>
+        <RichTextEditor
+          value={form.content}
+          onChange={(html) => setForm({ ...form, content: html })}
+          placeholder="Soạn nội dung bài viết..."
+        />
+
         <label>Ảnh cover URL</label>
         <input value={form.coverUrl} onChange={(e) => setForm({ ...form, coverUrl: e.target.value })} />
         <label>Tác giả</label>
@@ -620,25 +984,27 @@ function ArticlesPanel({ token, articles, setArticles, users, pushToast }) {
                   <td>{a.author?.fullName || "-"}</td>
                   <td>{new Date(a.createdAt).toLocaleDateString("vi-VN")}</td>
                   <td>
-                    <button
-                      className="small-btn ghost-btn"
-                      onClick={() =>
-                        setForm({
-                          id: a.id,
-                          title: a.title,
-                          slug: a.slug,
-                          summary: a.summary || "",
-                          content: a.content,
-                          coverUrl: a.coverUrl || "",
-                          status: a.status,
-                          authorId: a.authorId || "",
-                          publishedAt: a.publishedAt ? new Date(a.publishedAt).toISOString().slice(0, 16) : "",
-                        })
-                      }
-                    >
-                      Sửa
-                    </button>
-                    <button className="small-btn danger" onClick={() => handleDelete(a.id)}>Xoá</button>
+                    <div className="actions-cell">
+                      <button
+                        className="small-btn ghost-btn"
+                        onClick={() =>
+                          setForm({
+                            id: a.id,
+                            title: a.title,
+                            slug: a.slug,
+                            summary: a.summary || "",
+                            content: a.content,
+                            coverUrl: a.coverUrl || "",
+                            status: a.status,
+                            authorId: a.authorId || "",
+                            publishedAt: a.publishedAt ? new Date(a.publishedAt).toISOString().slice(0, 16) : "",
+                          })
+                        }
+                      >
+                        Sửa
+                      </button>
+                      <button className="small-btn danger" onClick={() => handleDelete(a.id)}>Xoá</button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -687,8 +1053,10 @@ function PitchesPanel({ token, pitches, setPitches, venues, pushToast }) {
     e.preventDefault();
     try {
       if (form.id) {
+        requireField(form.name, "Vui lòng nhập tên sân");
+        requireField(form.pitchType, "Vui lòng nhập loại sân");
+        requirePositiveNumber(form.basePrice, "Giá cơ bản phải lớn hơn 0");
         const res = await api.pitches.update(token, form.id, {
-          venueId: form.venueId,
           name: form.name,
           pitchType: form.pitchType,
           basePrice: Number(form.basePrice),
@@ -697,6 +1065,10 @@ function PitchesPanel({ token, pitches, setPitches, venues, pushToast }) {
         setPitches((prev) => prev.map((item) => (item.id === form.id ? res.data : item)));
         pushToast({ type: "success", title: "Đã cập nhật", message: "Thông tin sân con đã được lưu" });
       } else {
+        requireField(form.venueId, "Vui lòng chọn cụm sân");
+        requireField(form.name, "Vui lòng nhập tên sân");
+        requireField(form.pitchType, "Vui lòng nhập loại sân");
+        requirePositiveNumber(form.basePrice, "Giá cơ bản phải lớn hơn 0");
         const res = await api.pitches.create(token, { ...form, basePrice: Number(form.basePrice) });
         setPitches((prev) => [res.data, ...prev]);
         pushToast({ type: "success", title: "Thành công", message: "Đã tạo sân con" });
@@ -761,20 +1133,24 @@ function PitchesPanel({ token, pitches, setPitches, venues, pushToast }) {
                   <td>{formatMoney(p.basePrice)}</td>
                   <td><StatusBadge status={p.status} /></td>
                   <td>
-                    <button
-                      className="small-btn ghost-btn"
-                      onClick={() => setForm({
-                        id: p.id,
-                        venueId: p.venueId,
-                        name: p.name,
-                        pitchType: p.pitchType,
-                        basePrice: Number(p.basePrice),
-                        status: p.status,
-                      })}
-                    >
-                      Sửa
-                    </button>
-                    <button className="small-btn danger" onClick={() => handleDelete(p.id)}>Xoá</button>
+                    <div className="actions-cell">
+                      <button
+                        className="small-btn ghost-btn"
+                        onClick={() =>
+                          setForm({
+                            id: p.id,
+                            venueId: p.venueId,
+                            name: p.name,
+                            pitchType: p.pitchType,
+                            basePrice: Number(p.basePrice),
+                            status: p.status,
+                          })
+                        }
+                      >
+                        Sửa
+                      </button>
+                      <button className="small-btn danger" onClick={() => handleDelete(p.id)}>Xoá</button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -823,27 +1199,49 @@ function BookingsPanel({ token, bookings, setBookings, pitches, users, promotion
 
   const submit = async (e) => {
     e.preventDefault();
-    const payload = {
-      ...form,
+    try {
+      requireField(form.pitchId, "Vui lòng chọn sân");
+      requireField(form.bookingDate, "Vui lòng chọn ngày");
+      requireField(form.startTime, "Vui lòng nhập giờ bắt đầu");
+      requireField(form.endTime, "Vui lòng nhập giờ kết thúc");
+      requirePositiveNumber(form.subtotalPrice, "Tạm tính phải lớn hơn 0");
+    } catch (error) {
+      pushToast({ type: "error", title: "Không thể lưu", message: error.message || "Vui lòng kiểm tra lại" });
+      return;
+    }
+    const basePayload = {
+      pitchId: form.pitchId,
+      bookingDate: form.bookingDate,
+      startTime: form.startTime,
+      endTime: form.endTime,
       subtotalPrice: Number(form.subtotalPrice),
       promotionCode: form.promotionCode || undefined,
       userId: form.userId || undefined,
-      status: form.status,
-      paymentStatus: form.paymentStatus,
+      note: form.note || undefined,
     };
     try {
       if (form.id) {
+        const payload = {
+          ...basePayload,
+          status: form.status,
+          paymentStatus: form.paymentStatus,
+        };
         const res = await api.bookings.update(token, form.id, payload);
         setBookings((prev) => prev.map((b) => (b.id === form.id ? res.data : b)));
         pushToast({ type: "success", title: "Đã cập nhật", message: "Booking đã được cập nhật" });
       } else {
-        const res = await api.bookings.create(token, payload);
+        const res = await api.bookings.create(token, basePayload);
         setBookings((prev) => [res.data, ...prev]);
         pushToast({ type: "success", title: "Thành công", message: "Đã tạo booking" });
       }
       resetForm();
     } catch (error) {
-      pushToast({ type: "error", title: "Không thể lưu", message: error.message || "Vui lòng thử lại" });
+      const msg = error?.message || "Vui lòng thử lại";
+      pushToast({
+        type: "error",
+        title: "Không thể lưu",
+        message: msg.includes("Time slot already booked") ? "Khung giờ đã được đặt. Vui lòng chọn khung khác." : msg,
+      });
     }
   };
 
@@ -853,7 +1251,12 @@ function BookingsPanel({ token, bookings, setBookings, pitches, users, promotion
       setBookings((prev) => prev.map((b) => (b.id === id ? { ...b, status: res.data.status } : b)));
       pushToast({ type: "success", title: "Cập nhật trạng thái", message: `Booking đã chuyển sang ${status}` });
     } catch (error) {
-      pushToast({ type: "error", title: "Không thể cập nhật", message: error.message || "Vui lòng thử lại" });
+      const msg = error?.message || "Vui lòng thử lại";
+      pushToast({
+        type: "error",
+        title: "Không thể cập nhật",
+        message: msg.includes("Time slot already booked") ? "Khung giờ đã bị trùng lịch, không thể xác nhận." : msg,
+      });
     }
   };
 
@@ -936,29 +1339,31 @@ function BookingsPanel({ token, bookings, setBookings, pitches, users, promotion
                   <td><StatusBadge status={b.paymentStatus} /></td>
                   <td><StatusBadge status={b.status} /></td>
                   <td>
-                    <button
-                      className="small-btn ghost-btn"
-                      onClick={() =>
-                        setForm({
-                          id: b.id,
-                          userId: b.userId || "",
-                          pitchId: b.pitchId,
-                          bookingDate: new Date(b.bookingDate).toISOString().slice(0, 10),
-                          startTime: b.startTime,
-                          endTime: b.endTime,
-                          subtotalPrice: Number(b.subtotalPrice),
-                          promotionCode: b.promotion?.code || "",
-                          note: b.note || "",
-                          status: b.status,
-                          paymentStatus: b.paymentStatus,
-                        })
-                      }
-                    >
-                      Sửa
-                    </button>
-                    <button className="small-btn" onClick={() => updateStatus(b.id, "CONFIRMED")}>Confirm</button>
-                    <button className="small-btn ghost-btn" onClick={() => updateStatus(b.id, "CANCELLED")}>Cancel</button>
-                    <button className="small-btn danger" onClick={() => handleDelete(b.id)}>Xoá</button>
+                    <div className="actions-cell">
+                      <button
+                        className="small-btn ghost-btn"
+                        onClick={() =>
+                          setForm({
+                            id: b.id,
+                            userId: b.userId || "",
+                            pitchId: b.pitchId,
+                            bookingDate: new Date(b.bookingDate).toISOString().slice(0, 10),
+                            startTime: b.startTime,
+                            endTime: b.endTime,
+                            subtotalPrice: Number(b.subtotalPrice),
+                            promotionCode: b.promotion?.code || "",
+                            note: b.note || "",
+                            status: b.status,
+                            paymentStatus: b.paymentStatus,
+                          })
+                        }
+                      >
+                        Sửa
+                      </button>
+                      <button className="small-btn" onClick={() => updateStatus(b.id, "CONFIRMED")}>Confirm</button>
+                      <button className="small-btn ghost-btn" onClick={() => updateStatus(b.id, "CANCELLED")}>Cancel</button>
+                      <button className="small-btn danger" onClick={() => handleDelete(b.id)}>Xoá</button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -970,8 +1375,295 @@ function BookingsPanel({ token, bookings, setBookings, pitches, users, promotion
   );
 }
 
+function SchedulePanel({ token, venues, pitches, users, promotions, setBookings, pushToast }) {
+  const [date, setDate] = useState(() => toDateInput(new Date()));
+  const [venueId, setVenueId] = useState("");
+  const [pitchId, setPitchId] = useState("");
+  const [selected, setSelected] = useState(null);
+  const [creating, setCreating] = useState(false);
+  const [scheduleBookings, setScheduleBookings] = useState([]);
+  const [scheduleLoading, setScheduleLoading] = useState(false);
+
+  const filteredPitches = useMemo(() => {
+    const list = pitches || [];
+    if (!venueId) return list;
+    return list.filter((p) => p.venueId === venueId);
+  }, [pitches, venueId]);
+
+  useEffect(() => {
+    if (pitchId && filteredPitches.every((p) => p.id !== pitchId)) setPitchId("");
+  }, [filteredPitches, pitchId]);
+
+  const reloadSchedule = useCallback(async () => {
+    try {
+      setScheduleLoading(true);
+      const res = await api.bookings.list(token, { date, pitchId: pitchId || undefined });
+      setScheduleBookings(res.data || []);
+    } catch (e) {
+      pushToast({ type: "error", title: "Không tải được lịch", message: e.message || "Vui lòng thử lại" });
+    } finally {
+      setScheduleLoading(false);
+    }
+  }, [date, pitchId, pushToast, token]);
+
+  useEffect(() => {
+    reloadSchedule();
+  }, [reloadSchedule]);
+
+  const dayBookings = useMemo(() => {
+    if (!venueId) return scheduleBookings || [];
+    const pitchMap = new Map((pitches || []).map((p) => [p.id, p.venueId]));
+    return (scheduleBookings || []).filter((b) => pitchMap.get(b.pitchId) === venueId);
+  }, [scheduleBookings, venueId, pitches]);
+
+  const bookingByPitch = useMemo(() => {
+    const map = new Map();
+    for (const b of dayBookings) {
+      const arr = map.get(b.pitchId) || [];
+      arr.push(b);
+      map.set(b.pitchId, arr);
+    }
+    for (const [k, arr] of map.entries()) {
+      arr.sort((a, b) => timeToMinutes(a.startTime) - timeToMinutes(b.startTime));
+      map.set(k, arr);
+    }
+    return map;
+  }, [dayBookings]);
+
+  const visiblePitches = useMemo(() => {
+    const list = filteredPitches;
+    if (pitchId) return list.filter((p) => p.id === pitchId);
+    return list;
+  }, [filteredPitches, pitchId]);
+
+  const timeSlots = useMemo(() => {
+    const start = 6 * 60;
+    const end = 23 * 60;
+    const step = 30;
+    const slots = [];
+    for (let t = start; t <= end; t += step) slots.push(t);
+    return slots;
+  }, []);
+
+  const pickSlot = (p, startMin) => {
+    const endMin = startMin + 90;
+    setSelected({
+      pitchId: p.id,
+      startTime: minutesToTime(startMin),
+      endTime: minutesToTime(endMin),
+      slotKey: `${p.id}-${date}-${startMin}`,
+    });
+  };
+
+  const createBooking = async () => {
+    if (!selected) return;
+    try {
+      setCreating(true);
+      requireField(selected.pitchId, "Vui lòng chọn sân");
+      requireField(date, "Vui lòng chọn ngày");
+      requireField(selected.startTime, "Vui lòng chọn giờ bắt đầu");
+      requireField(selected.endTime, "Vui lòng chọn giờ kết thúc");
+      requirePositiveNumber(selected.subtotalPrice, "Tạm tính phải lớn hơn 0");
+
+      const payload = {
+        pitchId: selected.pitchId,
+        bookingDate: date,
+        startTime: selected.startTime,
+        endTime: selected.endTime,
+        subtotalPrice: Number(selected.subtotalPrice),
+        promotionCode: selected.promotionCode || undefined,
+        userId: selected.userId || undefined,
+        note: selected.note || undefined,
+      };
+
+      // Client-side guard: prevent overlapping bookings in same day/pitch.
+      const existing = (scheduleBookings || []).filter(
+        (b) => b.pitchId === payload.pitchId && toDateInput(b.bookingDate) === payload.bookingDate && ["PENDING", "CONFIRMED"].includes(b.status)
+      );
+      const conflict = existing.find((b) => isOverlapTime(payload.startTime, payload.endTime, b.startTime, b.endTime));
+      if (conflict) {
+        throw new Error(`Khung giờ đã được đặt (${conflict.startTime} - ${conflict.endTime}). Vui lòng chọn khung khác.`);
+      }
+
+      const res = await api.bookings.create(token, payload);
+      setBookings((prev) => [res.data, ...(prev || [])]);
+      setScheduleBookings((prev) => [res.data, ...(prev || [])]);
+      pushToast({ type: "success", title: "Thành công", message: "Đã tạo booking" });
+      setSelected(null);
+    } catch (e) {
+      pushToast({ type: "error", title: "Không thể tạo booking", message: e.message || "Vui lòng thử lại" });
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  return (
+    <section className="schedule">
+      <div className="schedule-toolbar card">
+        <div className="schedule-filters">
+          <div>
+            <label>Ngày</label>
+            <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+          </div>
+          <div>
+            <label>Cụm sân</label>
+            <select value={venueId} onChange={(e) => setVenueId(e.target.value)}>
+              <option value="">Tất cả</option>
+              {venues.map((v) => (
+                <option key={v.id} value={v.id}>
+                  {v.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label>Sân</label>
+            <select value={pitchId} onChange={(e) => setPitchId(e.target.value)}>
+              <option value="">Tất cả</option>
+              {filteredPitches.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name} ({p.pitchType})
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+        <div className="notice">
+          Click vào một khung giờ trống để tạo booking nhanh (mặc định 90 phút).
+        </div>
+      </div>
+
+      <div className="schedule-grid">
+        <div className="card">
+          <div className="schedule-table">
+            <div
+              className="schedule-head"
+              style={{ gridTemplateColumns: `72px repeat(${Math.max(1, visiblePitches.length)}, minmax(160px, 1fr))` }}
+            >
+              <div className="cell time">Giờ</div>
+              {visiblePitches.map((p) => (
+                <div key={p.id} className="cell pitch">
+                  <div className="pitch-name">{p.name}</div>
+                  <div className="pitch-sub">{p.pitchType}</div>
+                </div>
+              ))}
+            </div>
+
+            {timeSlots.map((t) => (
+              <div
+                key={t}
+                className="schedule-row"
+                style={{ gridTemplateColumns: `72px repeat(${Math.max(1, visiblePitches.length)}, minmax(160px, 1fr))` }}
+              >
+                <div className="cell time">{minutesToTime(t)}</div>
+                {visiblePitches.map((p) => {
+                  const list = bookingByPitch.get(p.id) || [];
+                  const hit = list.find((b) => {
+                    const s = timeToMinutes(b.startTime);
+                    const e = timeToMinutes(b.endTime);
+                    return t >= s && t < e;
+                  });
+                  const isStart = hit && timeToMinutes(hit.startTime) === t;
+                  return (
+                    <div
+                      key={`${p.id}-${t}`}
+                      className={
+                        hit
+                          ? "cell slot busy"
+                          : selected?.slotKey === `${p.id}-${date}-${t}`
+                            ? "cell slot selected"
+                            : "cell slot"
+                      }
+                      onClick={() => (!hit ? pickSlot(p, t) : null)}
+                      role="button"
+                      tabIndex={0}
+                    >
+                      {hit && isStart ? (
+                        <div className="booking-pill">
+                          <div className="booking-title">{hit.bookingCode}</div>
+                          <div className="booking-sub">
+                            {hit.startTime} - {hit.endTime}
+                          </div>
+                        </div>
+                      ) : hit ? (
+                        <div className="booking-ghost" />
+                      ) : null}
+                    </div>
+                  );
+                })}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="card">
+          <h3 className="card-title">Đặt lịch nhanh</h3>
+          {scheduleLoading && <div className="notice">Đang tải lịch...</div>}
+          {!selected ? (
+            <div className="notice">Chọn một khung giờ trống ở bảng lịch để tạo booking.</div>
+          ) : (
+            <>
+              <label>Sân</label>
+              <select value={selected.pitchId} onChange={(e) => setSelected((s) => ({ ...s, pitchId: e.target.value }))}>
+                {filteredPitches.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name} ({p.pitchType})
+                  </option>
+                ))}
+              </select>
+              <label>Ngày</label>
+              <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+              <label>Giờ bắt đầu</label>
+              <input value={selected.startTime} onChange={(e) => setSelected((s) => ({ ...s, startTime: e.target.value }))} />
+              <label>Giờ kết thúc</label>
+              <input value={selected.endTime} onChange={(e) => setSelected((s) => ({ ...s, endTime: e.target.value }))} />
+              <label>Khách hàng (tuỳ chọn)</label>
+              <select value={selected.userId || ""} onChange={(e) => setSelected((s) => ({ ...s, userId: e.target.value || "" }))}>
+                <option value="">Chọn người dùng</option>
+                {users.map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.fullName} - {u.email}
+                  </option>
+                ))}
+              </select>
+              <label>Mã giảm giá (tuỳ chọn)</label>
+              <select
+                value={selected.promotionCode || ""}
+                onChange={(e) => setSelected((s) => ({ ...s, promotionCode: e.target.value || "" }))}
+              >
+                <option value="">Không dùng</option>
+                {promotions.map((p) => (
+                  <option key={p.id} value={p.code}>
+                    {p.code} - {p.name}
+                  </option>
+                ))}
+              </select>
+              <label>Tạm tính</label>
+              <input
+                type="number"
+                value={selected.subtotalPrice || 300000}
+                onChange={(e) => setSelected((s) => ({ ...s, subtotalPrice: e.target.value }))}
+              />
+              <label>Ghi chú</label>
+              <input value={selected.note || ""} onChange={(e) => setSelected((s) => ({ ...s, note: e.target.value }))} />
+              <div className="form-actions">
+                <button type="button" onClick={createBooking} disabled={creating}>
+                  {creating ? "Đang tạo..." : "Tạo booking"}
+                </button>
+                <button type="button" className="ghost-btn" onClick={() => setSelected(null)}>
+                  Huỷ
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function PromotionsPanel({ token, promotions, setPromotions, pushToast }) {
-  const [form, setForm] = useState({
+  const [form, setForm] = useState(() => ({
     id: "",
     code: "",
     name: "",
@@ -984,10 +1676,10 @@ function PromotionsPanel({ token, promotions, setPromotions, pushToast }) {
     endAt: new Date(Date.now() + 86400000 * 30).toISOString().slice(0, 16),
     usageLimit: 100,
     isActive: true,
-  });
+  }));
 
   const resetForm = () =>
-    setForm({
+    setForm(() => ({
       id: "",
       code: "",
       name: "",
@@ -1000,26 +1692,50 @@ function PromotionsPanel({ token, promotions, setPromotions, pushToast }) {
       endAt: new Date(Date.now() + 86400000 * 30).toISOString().slice(0, 16),
       usageLimit: 100,
       isActive: true,
-    });
+    }));
 
   const submit = async (e) => {
     e.preventDefault();
-    const payload = {
-      ...form,
+    try {
+      requireField(form.name, "Vui lòng nhập tên chương trình");
+      requireField(form.type, "Vui lòng chọn kiểu giảm");
+      requirePositiveNumber(form.value, "Giá trị giảm phải lớn hơn 0");
+      requireField(form.startAt, "Vui lòng chọn thời gian bắt đầu");
+      requireField(form.endAt, "Vui lòng chọn thời gian kết thúc");
+      if (!form.id) requireField(form.code, "Vui lòng nhập code");
+    } catch (error) {
+      pushToast({ type: "error", title: "Không thể lưu", message: error.message || "Vui lòng kiểm tra lại" });
+      return;
+    }
+    const maybePositive = (v) => {
+      const n = Number(v);
+      return Number.isFinite(n) && n > 0 ? n : undefined;
+    };
+
+    const commonPayload = {
+      name: form.name,
+      description: form.description || undefined,
+      type: form.type,
       value: Number(form.value),
-      minOrderValue: Number(form.minOrderValue),
-      maxDiscount: Number(form.maxDiscount),
-      usageLimit: Number(form.usageLimit),
+      minOrderValue: maybePositive(form.minOrderValue),
+      maxDiscount: maybePositive(form.maxDiscount),
+      usageLimit: maybePositive(form.usageLimit),
+      isActive: form.isActive,
       startAt: new Date(form.startAt).toISOString(),
       endAt: new Date(form.endAt).toISOString(),
     };
     try {
       if (form.id) {
-        const res = await api.promotions.update(token, form.id, payload);
+        // Update schema does NOT allow changing code; also omit optional numeric fields when empty/0.
+        const res = await api.promotions.update(token, form.id, commonPayload);
         setPromotions((prev) => prev.map((item) => (item.id === form.id ? res.data : item)));
         pushToast({ type: "success", title: "Đã cập nhật", message: "Mã giảm giá đã được lưu" });
       } else {
-        const res = await api.promotions.create(token, payload);
+        const createPayload = {
+          ...commonPayload,
+          code: form.code,
+        };
+        const res = await api.promotions.create(token, createPayload);
         setPromotions((prev) => [res.data, ...prev]);
         pushToast({ type: "success", title: "Thành công", message: "Đã tạo mã giảm giá" });
       }
@@ -1095,28 +1811,30 @@ function PromotionsPanel({ token, promotions, setPromotions, pushToast }) {
                   <td>{p.usedCount}</td>
                   <td>{p.isActive ? "ACTIVE" : "INACTIVE"}</td>
                   <td>
-                    <button
-                      className="small-btn ghost-btn"
-                      onClick={() =>
-                        setForm({
-                          id: p.id,
-                          code: p.code,
-                          name: p.name,
-                          type: p.type,
-                          value: Number(p.value),
-                          minOrderValue: Number(p.minOrderValue || 0),
-                          maxDiscount: Number(p.maxDiscount || 0),
-                          startAt: new Date(p.startAt).toISOString().slice(0, 16),
-                          endAt: new Date(p.endAt).toISOString().slice(0, 16),
-                          usageLimit: p.usageLimit || 0,
-                          isActive: p.isActive,
-                          description: p.description || "",
-                        })
-                      }
-                    >
-                      Sửa
-                    </button>
-                    <button className="small-btn danger" onClick={() => handleDelete(p.id)}>Xoá</button>
+                    <div className="actions-cell">
+                      <button
+                        className="small-btn ghost-btn"
+                        onClick={() =>
+                          setForm({
+                            id: p.id,
+                            code: p.code,
+                            name: p.name,
+                            type: p.type,
+                            value: Number(p.value),
+                            minOrderValue: Number(p.minOrderValue || 0),
+                            maxDiscount: Number(p.maxDiscount || 0),
+                            startAt: new Date(p.startAt).toISOString().slice(0, 16),
+                            endAt: new Date(p.endAt).toISOString().slice(0, 16),
+                            usageLimit: p.usageLimit || 0,
+                            isActive: p.isActive,
+                            description: p.description || "",
+                          })
+                        }
+                      >
+                        Sửa
+                      </button>
+                      <button className="small-btn danger" onClick={() => handleDelete(p.id)}>Xoá</button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -1129,9 +1847,6 @@ function PromotionsPanel({ token, promotions, setPromotions, pushToast }) {
 }
 
 function PaymentsPanel({ token, bookings, payments, setPayments, pushToast }) {
-  const [bookingId, setBookingId] = useState("");
-  const [amount, setAmount] = useState("");
-  const [paymentUrl, setPaymentUrl] = useState("");
   const [form, setForm] = useState({
     id: "",
     bookingId: "",
@@ -1145,43 +1860,21 @@ function PaymentsPanel({ token, bookings, payments, setPayments, pushToast }) {
   const resetForm = () =>
     setForm({ id: "", bookingId: "", amount: "", status: "PENDING", provider: "VNPAY", providerTxnNo: "", paidAt: "" });
 
-  const createUrl = async () => {
-    try {
-      const res = await api.payments.createVnpayUrl(token, {
-        bookingId,
-        amount: amount ? Number(amount) : undefined,
-      });
-      setPaymentUrl(res.data.paymentUrl);
-      pushToast({ type: "success", title: "Đã tạo link", message: "Link thanh toán đã sẵn sàng" });
-    } catch (error) {
-      pushToast({ type: "error", title: "Không thể tạo link", message: error.message || "Vui lòng thử lại" });
-    }
-  };
-
   const submit = async (e) => {
     e.preventDefault();
     try {
-      if (form.id) {
-        const res = await api.payments.update(token, form.id, {
-          status: form.status,
-          amount: Number(form.amount),
-          providerTxnNo: form.providerTxnNo || undefined,
-          paidAt: form.paidAt ? new Date(form.paidAt).toISOString() : null,
-        });
-        setPayments((prev) => prev.map((p) => (p.id === form.id ? res.data : p)));
-        pushToast({ type: "success", title: "Đã cập nhật", message: "Giao dịch đã được lưu" });
-      } else {
-        const res = await api.payments.create(token, {
-          bookingId: form.bookingId,
-          provider: form.provider,
-          status: form.status,
-          amount: Number(form.amount),
-          providerTxnNo: form.providerTxnNo || undefined,
-          paidAt: form.paidAt ? new Date(form.paidAt).toISOString() : undefined,
-        });
-        setPayments((prev) => [res.data, ...prev]);
-        pushToast({ type: "success", title: "Thành công", message: "Đã tạo giao dịch" });
+      if (!form.id) {
+        throw new Error("Chỉ hỗ trợ cập nhật giao dịch đã có (VNPay được thanh toán trên app khách hàng)");
       }
+      requirePositiveNumber(form.amount, "Số tiền phải lớn hơn 0");
+      const res = await api.payments.update(token, form.id, {
+        status: form.status,
+        amount: Number(form.amount),
+        providerTxnNo: form.providerTxnNo || undefined,
+        paidAt: form.paidAt ? new Date(form.paidAt).toISOString() : null,
+      });
+      setPayments((prev) => prev.map((p) => (p.id === form.id ? res.data : p)));
+      pushToast({ type: "success", title: "Đã cập nhật", message: "Giao dịch đã được lưu" });
       resetForm();
     } catch (error) {
       pushToast({ type: "error", title: "Không thể lưu", message: error.message || "Vui lòng thử lại" });
@@ -1200,28 +1893,15 @@ function PaymentsPanel({ token, bookings, payments, setPayments, pushToast }) {
 
   return (
     <section className="grid two">
-      <div className="card">
-        <h3 className="card-title">Tạo link thanh toán VNPay</h3>
-        <label>Booking</label>
-        <select value={bookingId} onChange={(e) => setBookingId(e.target.value)}>
-          <option value="">Chọn booking</option>
-          {bookings.map((b) => <option key={b.id} value={b.id}>{b.bookingCode} - {formatMoney(b.totalPrice)}</option>)}
-        </select>
-        <label>Số tiền (tuỳ chọn)</label>
-        <input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} />
-        <button type="button" onClick={createUrl}>Tạo URL thanh toán</button>
-        {paymentUrl && (
-          <div className="payment-link">
-            <a href={paymentUrl} target="_blank" rel="noreferrer">Mở cổng thanh toán VNPay</a>
-          </div>
-        )}
-      </div>
-
       <form className="card" onSubmit={submit}>
         <h3 className="card-title">Quản lý giao dịch</h3>
+        <div className="notice">
+          Thanh toán VNPay được thực hiện trên app khách hàng. Quản trị chỉ dùng để cập nhật trạng thái giao dịch khi cần đối soát.
+        </div>
+        {!form.id && <div className="notice">Chọn một giao dịch ở danh sách bên dưới và bấm “Sửa” để cập nhật.</div>}
         <label>Booking</label>
-        <select value={form.bookingId} onChange={(e) => setForm({ ...form, bookingId: e.target.value })}>
-          <option value="">Chọn booking</option>
+        <select value={form.bookingId} disabled>
+          <option value="">{form.id ? "Đã chọn booking" : "Chưa chọn giao dịch"}</option>
           {bookings.map((b) => <option key={b.id} value={b.id}>{b.bookingCode} - {formatMoney(b.totalPrice)}</option>)}
         </select>
         <label>Số tiền</label>
@@ -1237,12 +1917,8 @@ function PaymentsPanel({ token, bookings, payments, setPayments, pushToast }) {
         <label>Thanh toán lúc</label>
         <input type="datetime-local" value={form.paidAt} onChange={(e) => setForm({ ...form, paidAt: e.target.value })} />
         <div className="form-actions">
-          <button>{form.id ? "Cập nhật" : "Tạo giao dịch"}</button>
-          {form.id && (
-            <button type="button" className="ghost-btn" onClick={resetForm}>
-              Huỷ
-            </button>
-          )}
+          <button disabled={!form.id}>{form.id ? "Cập nhật" : "Chọn giao dịch để cập nhật"}</button>
+          <button type="button" className="ghost-btn" onClick={resetForm}>Làm mới form</button>
         </div>
       </form>
 
@@ -1260,23 +1936,25 @@ function PaymentsPanel({ token, bookings, payments, setPayments, pushToast }) {
                   <td><StatusBadge status={p.status} /></td>
                   <td>{new Date(p.createdAt).toLocaleDateString("vi-VN")}</td>
                   <td>
-                    <button
-                      className="small-btn ghost-btn"
-                      onClick={() =>
-                        setForm({
-                          id: p.id,
-                          bookingId: p.bookingId,
-                          amount: Number(p.amount),
-                          status: p.status,
-                          provider: p.provider,
-                          providerTxnNo: p.providerTxnNo || "",
-                          paidAt: p.paidAt ? new Date(p.paidAt).toISOString().slice(0, 16) : "",
-                        })
-                      }
-                    >
-                      Sửa
-                    </button>
-                    <button className="small-btn danger" onClick={() => handleDelete(p.id)}>Xoá</button>
+                    <div className="actions-cell">
+                      <button
+                        className="small-btn ghost-btn"
+                        onClick={() =>
+                          setForm({
+                            id: p.id,
+                            bookingId: p.bookingId,
+                            amount: Number(p.amount),
+                            status: p.status,
+                            provider: p.provider,
+                            providerTxnNo: p.providerTxnNo || "",
+                            paidAt: p.paidAt ? new Date(p.paidAt).toISOString().slice(0, 16) : "",
+                          })
+                        }
+                      >
+                        Sửa
+                      </button>
+                      <button className="small-btn danger" onClick={() => handleDelete(p.id)}>Xoá</button>
+                    </div>
                   </td>
                 </tr>
               ))}
