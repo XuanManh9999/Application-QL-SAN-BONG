@@ -2,6 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Quill from "quill";
 import "quill/dist/quill.snow.css";
 import * as echarts from "echarts";
+import TurndownService from "turndown";
+import Editor from "@toast-ui/editor";
+import "@toast-ui/editor/dist/toastui-editor.css";
 import "./App.css";
 import { api } from "./api";
 
@@ -38,6 +41,13 @@ const requirePositiveNumber = (value, message) => {
 };
 
 const toDateInput = (d) => new Date(d).toISOString().slice(0, 10);
+const toDateTimeLocalInput = (d) => {
+  if (!d) return "";
+  const dt = new Date(d);
+  if (Number.isNaN(dt.getTime())) return "";
+  const tz = dt.getTimezoneOffset() * 60000;
+  return new Date(dt.getTime() - tz).toISOString().slice(0, 16);
+};
 const pad2 = (n) => String(n).padStart(2, "0");
 const timeToMinutes = (t) => {
   const [hh, mm] = String(t || "00:00").split(":").map((x) => Number(x));
@@ -98,6 +108,87 @@ function RichTextEditor({ value, onChange, placeholder }) {
 
   return <div className="rte" ref={hostRef} />;
 }
+
+function MarkdownProEditor({ token, value, onChange, onUploadError }) {
+  const hostRef = useRef(null);
+  const editorRef = useRef(null);
+  const lastValueRef = useRef(value || "");
+
+  useEffect(() => {
+    if (!hostRef.current || editorRef.current) return;
+
+    const editor = new Editor({
+      el: hostRef.current,
+      height: "640px",
+      initialEditType: "wysiwyg",
+      previewStyle: "tab",
+      hideModeSwitch: true,
+      usageStatistics: false,
+      initialValue: value || "",
+      hooks: {
+        addImageBlobHook: async (blob, callback) => {
+          // Upload and insert URL (clean content, stable rendering)
+          try {
+            const res = await api.uploads.image(token, blob);
+            const url = res?.data?.url;
+            if (!url) throw new Error("Upload failed");
+            callback(url, blob?.name || "image");
+          } catch {
+            callback("", "");
+            onUploadError?.(new Error("Không thể upload ảnh. Vui lòng kiểm tra Backend đang chạy và bạn đã đăng nhập."));
+          }
+          return false;
+        },
+      },
+    });
+
+    editor.on("change", () => {
+      const md = editor.getMarkdown();
+      lastValueRef.current = md;
+      onChange?.(md);
+    });
+
+    editorRef.current = editor;
+  }, [onChange, onUploadError, token, value]);
+
+  useEffect(() => {
+    const ed = editorRef.current;
+    if (!ed) return;
+    const next = value || "";
+    if (next === lastValueRef.current) return;
+    ed.setMarkdown(next, false);
+    lastValueRef.current = next;
+  }, [value]);
+
+  useEffect(() => {
+    return () => {
+      try {
+        editorRef.current?.destroy?.();
+      } finally {
+        editorRef.current = null;
+      }
+    };
+  }, []);
+
+  return <div className="md-pro" ref={hostRef} />;
+}
+
+const turndown = new TurndownService({
+  headingStyle: "atx",
+  codeBlockStyle: "fenced",
+  emDelimiter: "_",
+});
+const looksLikeHtml = (s) => /<\/?[a-z][\s\S]*>/i.test(String(s || ""));
+const toMarkdown = (content) => {
+  const raw = String(content || "");
+  if (!raw) return "";
+  if (!looksLikeHtml(raw)) return raw;
+  try {
+    return turndown.turndown(raw);
+  } catch {
+    return raw.replace(/<[^>]+>/g, "").trim();
+  }
+};
 
 function EChart({ option, height = 320 }) {
   const hostRef = useRef(null);
@@ -878,8 +969,28 @@ function ArticlesPanel({ token, articles, setArticles, users, pushToast }) {
     authorId: "",
     publishedAt: "",
   });
+  const [editorSeed, setEditorSeed] = useState(0);
+  const [filters, setFilters] = useState({
+    q: "",
+    status: "",
+    authorId: "",
+  });
   const resetForm = () =>
     setForm({ id: "", title: "", slug: "", summary: "", content: "", coverUrl: "", status: "DRAFT", authorId: "", publishedAt: "" });
+
+  const filteredArticles = useMemo(() => {
+    const q = String(filters.q || "").trim().toLowerCase();
+    const byText = (a) => {
+      if (!q) return true;
+      const hay = `${a.title || ""}\n${a.slug || ""}\n${a.summary || ""}`.toLowerCase();
+      return hay.includes(q);
+    };
+    const byStatus = (a) => (!filters.status ? true : String(a.status || "") === filters.status);
+    const byAuthor = (a) => (!filters.authorId ? true : String(a.authorId || a.author?.id || "") === filters.authorId);
+    return (articles || [])
+      .filter((a) => byText(a) && byStatus(a) && byAuthor(a))
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  }, [articles, filters.authorId, filters.q, filters.status]);
 
   const submit = async (e) => {
     e.preventDefault();
@@ -938,11 +1049,13 @@ function ArticlesPanel({ token, articles, setArticles, users, pushToast }) {
         <input value={form.slug} onChange={(e) => setForm({ ...form, slug: e.target.value })} />
         <label>Tóm tắt</label>
         <input value={form.summary} onChange={(e) => setForm({ ...form, summary: e.target.value })} />
-        <label>Nội dung (Rich text)</label>
-        <RichTextEditor
+        <label>Nội dung</label>
+        <MarkdownProEditor
+          key={`${form.id || "new"}-${editorSeed}`}
+          token={token}
           value={form.content}
-          onChange={(html) => setForm({ ...form, content: html })}
-          placeholder="Soạn nội dung bài viết..."
+          onChange={(md) => setForm((prev) => ({ ...prev, content: md }))}
+          onUploadError={(e) => pushToast({ type: "error", title: "Upload ảnh thất bại", message: e.message || "Vui lòng thử lại" })}
         />
 
         <label>Ảnh cover URL</label>
@@ -950,6 +1063,9 @@ function ArticlesPanel({ token, articles, setArticles, users, pushToast }) {
         <label>Tác giả</label>
         <select value={form.authorId} onChange={(e) => setForm({ ...form, authorId: e.target.value })}>
           <option value="">Chọn tác giả</option>
+          {form.authorId && users.every((u) => u.id !== form.authorId) && (
+            <option value={form.authorId}>Tác giả hiện tại (không có trong danh sách)</option>
+          )}
           {users.map((u) => <option key={u.id} value={u.id}>{u.fullName}</option>)}
         </select>
         <label>Trạng thái</label>
@@ -971,12 +1087,56 @@ function ArticlesPanel({ token, articles, setArticles, users, pushToast }) {
       </form>
 
       <div className="card">
-        <h3 className="card-title">Danh sách bài viết</h3>
+        <div className="table-top">
+          <div>
+            <h3 className="card-title">Danh sách bài viết</h3>
+            <div className="subtitle">Hiển thị {filteredArticles.length} / {(articles || []).length} bài viết</div>
+          </div>
+          <button
+            type="button"
+            className="ghost-btn"
+            onClick={() => setFilters({ q: "", status: "", authorId: "" })}
+            disabled={!filters.q && !filters.status && !filters.authorId}
+          >
+            Xoá lọc
+          </button>
+        </div>
+
+        <div className="table-filters">
+          <div className="field">
+            <label>Tìm kiếm</label>
+            <input
+              value={filters.q}
+              onChange={(e) => setFilters((s) => ({ ...s, q: e.target.value }))}
+              placeholder="Tìm theo tiêu đề / slug / tóm tắt..."
+            />
+          </div>
+          <div className="field">
+            <label>Trạng thái</label>
+            <select value={filters.status} onChange={(e) => setFilters((s) => ({ ...s, status: e.target.value }))}>
+              <option value="">Tất cả</option>
+              <option value="DRAFT">DRAFT</option>
+              <option value="PUBLISHED">PUBLISHED</option>
+              <option value="ARCHIVED">ARCHIVED</option>
+            </select>
+          </div>
+          <div className="field">
+            <label>Tác giả</label>
+            <select value={filters.authorId} onChange={(e) => setFilters((s) => ({ ...s, authorId: e.target.value }))}>
+              <option value="">Tất cả</option>
+              {users.map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.fullName}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
         <div className="table-wrap">
           <table>
             <thead><tr><th>Tiêu đề</th><th>Slug</th><th>Trạng thái</th><th>Tác giả</th><th>Ngày tạo</th><th>Tác vụ</th></tr></thead>
             <tbody>
-              {articles.map((a) => (
+              {filteredArticles.map((a) => (
                 <tr key={a.id}>
                   <td>{a.title}</td>
                   <td>{a.slug}</td>
@@ -988,17 +1148,17 @@ function ArticlesPanel({ token, articles, setArticles, users, pushToast }) {
                       <button
                         className="small-btn ghost-btn"
                         onClick={() =>
-                          setForm({
+                          (setForm({
                             id: a.id,
                             title: a.title,
                             slug: a.slug,
                             summary: a.summary || "",
-                            content: a.content,
+                            content: toMarkdown(a.content),
                             coverUrl: a.coverUrl || "",
                             status: a.status,
-                            authorId: a.authorId || "",
-                            publishedAt: a.publishedAt ? new Date(a.publishedAt).toISOString().slice(0, 16) : "",
-                          })
+                            authorId: a.authorId || a.author?.id || "",
+                            publishedAt: a.publishedAt ? toDateTimeLocalInput(a.publishedAt) : "",
+                          }), setEditorSeed((s) => s + 1))
                         }
                       >
                         Sửa
@@ -1008,6 +1168,15 @@ function ArticlesPanel({ token, articles, setArticles, users, pushToast }) {
                   </td>
                 </tr>
               ))}
+              {!filteredArticles.length && (
+                <tr>
+                  <td colSpan={6}>
+                    <div className="notice" style={{ margin: 0 }}>
+                      Không có bài viết nào phù hợp bộ lọc hiện tại.
+                    </div>
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
@@ -1436,6 +1605,15 @@ function SchedulePanel({ token, venues, pitches, users, promotions, setBookings,
     return list;
   }, [filteredPitches, pitchId]);
 
+  const getPitchBasePrice = useCallback(
+    (id) => {
+      const p = (pitches || []).find((x) => x.id === id);
+      const n = Number(p?.basePrice);
+      return Number.isFinite(n) && n > 0 ? n : 300000;
+    },
+    [pitches]
+  );
+
   const timeSlots = useMemo(() => {
     const start = 6 * 60;
     const end = 23 * 60;
@@ -1452,6 +1630,10 @@ function SchedulePanel({ token, venues, pitches, users, promotions, setBookings,
       startTime: minutesToTime(startMin),
       endTime: minutesToTime(endMin),
       slotKey: `${p.id}-${date}-${startMin}`,
+      subtotalPrice: Number.isFinite(Number(p?.basePrice)) && Number(p.basePrice) > 0 ? Number(p.basePrice) : 300000,
+      userId: "",
+      promotionCode: "",
+      note: "",
     });
   };
 
@@ -1463,14 +1645,15 @@ function SchedulePanel({ token, venues, pitches, users, promotions, setBookings,
       requireField(date, "Vui lòng chọn ngày");
       requireField(selected.startTime, "Vui lòng chọn giờ bắt đầu");
       requireField(selected.endTime, "Vui lòng chọn giờ kết thúc");
-      requirePositiveNumber(selected.subtotalPrice, "Tạm tính phải lớn hơn 0");
+      const subtotal = Number(selected.subtotalPrice ?? getPitchBasePrice(selected.pitchId));
+      requirePositiveNumber(subtotal, "Tạm tính phải lớn hơn 0");
 
       const payload = {
         pitchId: selected.pitchId,
         bookingDate: date,
         startTime: selected.startTime,
         endTime: selected.endTime,
-        subtotalPrice: Number(selected.subtotalPrice),
+        subtotalPrice: subtotal,
         promotionCode: selected.promotionCode || undefined,
         userId: selected.userId || undefined,
         note: selected.note || undefined,
@@ -1528,7 +1711,7 @@ function SchedulePanel({ token, venues, pitches, users, promotions, setBookings,
             </select>
           </div>
         </div>
-        <div className="notice">
+        <div className="notice schedule-hint">
           Click vào một khung giờ trống để tạo booking nhanh (mặc định 90 phút).
         </div>
       </div>
@@ -1596,56 +1779,105 @@ function SchedulePanel({ token, venues, pitches, users, promotions, setBookings,
           </div>
         </div>
 
-        <div className="card">
-          <h3 className="card-title">Đặt lịch nhanh</h3>
-          {scheduleLoading && <div className="notice">Đang tải lịch...</div>}
+        <div className="card quick-card">
+          <div className="quick-header">
+            <h3 className="card-title">Đặt lịch nhanh</h3>
+            {selected ? (
+              <button type="button" className="ghost-btn small-btn" onClick={() => setSelected(null)}>
+                Bỏ chọn
+              </button>
+            ) : null}
+          </div>
+
+          {scheduleLoading ? <div className="notice">Đang tải lịch...</div> : null}
+
           {!selected ? (
             <div className="notice">Chọn một khung giờ trống ở bảng lịch để tạo booking.</div>
           ) : (
-            <>
-              <label>Sân</label>
-              <select value={selected.pitchId} onChange={(e) => setSelected((s) => ({ ...s, pitchId: e.target.value }))}>
-                {filteredPitches.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name} ({p.pitchType})
-                  </option>
-                ))}
-              </select>
-              <label>Ngày</label>
-              <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-              <label>Giờ bắt đầu</label>
-              <input value={selected.startTime} onChange={(e) => setSelected((s) => ({ ...s, startTime: e.target.value }))} />
-              <label>Giờ kết thúc</label>
-              <input value={selected.endTime} onChange={(e) => setSelected((s) => ({ ...s, endTime: e.target.value }))} />
-              <label>Khách hàng (tuỳ chọn)</label>
-              <select value={selected.userId || ""} onChange={(e) => setSelected((s) => ({ ...s, userId: e.target.value || "" }))}>
-                <option value="">Chọn người dùng</option>
-                {users.map((u) => (
-                  <option key={u.id} value={u.id}>
-                    {u.fullName} - {u.email}
-                  </option>
-                ))}
-              </select>
-              <label>Mã giảm giá (tuỳ chọn)</label>
-              <select
-                value={selected.promotionCode || ""}
-                onChange={(e) => setSelected((s) => ({ ...s, promotionCode: e.target.value || "" }))}
-              >
-                <option value="">Không dùng</option>
-                {promotions.map((p) => (
-                  <option key={p.id} value={p.code}>
-                    {p.code} - {p.name}
-                  </option>
-                ))}
-              </select>
-              <label>Tạm tính</label>
-              <input
-                type="number"
-                value={selected.subtotalPrice || 300000}
-                onChange={(e) => setSelected((s) => ({ ...s, subtotalPrice: e.target.value }))}
-              />
-              <label>Ghi chú</label>
-              <input value={selected.note || ""} onChange={(e) => setSelected((s) => ({ ...s, note: e.target.value }))} />
+            <div className="quick-form">
+              <div className="form-grid">
+                <div className="field">
+                  <label>Sân</label>
+                  <select
+                    value={selected.pitchId}
+                    onChange={(e) =>
+                      setSelected((s) => {
+                        const nextPitchId = e.target.value;
+                        const current = Number(s?.subtotalPrice);
+                        const shouldAutofill = !Number.isFinite(current) || current <= 0;
+                        return {
+                          ...s,
+                          pitchId: nextPitchId,
+                          subtotalPrice: shouldAutofill ? getPitchBasePrice(nextPitchId) : s.subtotalPrice,
+                        };
+                      })
+                    }
+                  >
+                    {filteredPitches.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name} ({p.pitchType})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="field">
+                  <label>Ngày</label>
+                  <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+                </div>
+
+                <div className="field">
+                  <label>Giờ bắt đầu</label>
+                  <input value={selected.startTime} onChange={(e) => setSelected((s) => ({ ...s, startTime: e.target.value }))} />
+                </div>
+
+                <div className="field">
+                  <label>Giờ kết thúc</label>
+                  <input value={selected.endTime} onChange={(e) => setSelected((s) => ({ ...s, endTime: e.target.value }))} />
+                </div>
+
+                <div className="field span-2">
+                  <label>Khách hàng (tuỳ chọn)</label>
+                  <select value={selected.userId || ""} onChange={(e) => setSelected((s) => ({ ...s, userId: e.target.value || "" }))}>
+                    <option value="">Chọn người dùng</option>
+                    {users.map((u) => (
+                      <option key={u.id} value={u.id}>
+                        {u.fullName} - {u.email}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="field span-2">
+                  <label>Mã giảm giá (tuỳ chọn)</label>
+                  <select
+                    value={selected.promotionCode || ""}
+                    onChange={(e) => setSelected((s) => ({ ...s, promotionCode: e.target.value || "" }))}
+                  >
+                    <option value="">Không dùng</option>
+                    {promotions.map((p) => (
+                      <option key={p.id} value={p.code}>
+                        {p.code} - {p.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="field">
+                  <label>Tạm tính</label>
+                  <input
+                    type="number"
+                    value={selected.subtotalPrice || 300000}
+                    onChange={(e) => setSelected((s) => ({ ...s, subtotalPrice: e.target.value }))}
+                  />
+                </div>
+
+                <div className="field">
+                  <label>Ghi chú</label>
+                  <input value={selected.note || ""} onChange={(e) => setSelected((s) => ({ ...s, note: e.target.value }))} />
+                </div>
+              </div>
+
               <div className="form-actions">
                 <button type="button" onClick={createBooking} disabled={creating}>
                   {creating ? "Đang tạo..." : "Tạo booking"}
@@ -1654,7 +1886,7 @@ function SchedulePanel({ token, venues, pitches, users, promotions, setBookings,
                   Huỷ
                 </button>
               </div>
-            </>
+            </div>
           )}
         </div>
       </div>
@@ -1847,117 +2079,100 @@ function PromotionsPanel({ token, promotions, setPromotions, pushToast }) {
 }
 
 function PaymentsPanel({ token, bookings, payments, setPayments, pushToast }) {
-  const [form, setForm] = useState({
-    id: "",
-    bookingId: "",
-    amount: "",
-    status: "PENDING",
-    provider: "VNPAY",
-    providerTxnNo: "",
-    paidAt: "",
-  });
+  const [q, setQ] = useState("");
 
-  const resetForm = () =>
-    setForm({ id: "", bookingId: "", amount: "", status: "PENDING", provider: "VNPAY", providerTxnNo: "", paidAt: "" });
-
-  const submit = async (e) => {
-    e.preventDefault();
-    try {
-      if (!form.id) {
-        throw new Error("Chỉ hỗ trợ cập nhật giao dịch đã có (VNPay được thanh toán trên app khách hàng)");
-      }
-      requirePositiveNumber(form.amount, "Số tiền phải lớn hơn 0");
-      const res = await api.payments.update(token, form.id, {
-        status: form.status,
-        amount: Number(form.amount),
-        providerTxnNo: form.providerTxnNo || undefined,
-        paidAt: form.paidAt ? new Date(form.paidAt).toISOString() : null,
-      });
-      setPayments((prev) => prev.map((p) => (p.id === form.id ? res.data : p)));
-      pushToast({ type: "success", title: "Đã cập nhật", message: "Giao dịch đã được lưu" });
-      resetForm();
-    } catch (error) {
-      pushToast({ type: "error", title: "Không thể lưu", message: error.message || "Vui lòng thử lại" });
-    }
-  };
-
-  const handleDelete = async (id) => {
-    try {
-      await api.payments.remove(token, id);
-      setPayments((prev) => prev.filter((p) => p.id !== id));
-      pushToast({ type: "success", title: "Đã xoá", message: "Giao dịch đã được xoá" });
-    } catch (error) {
-      pushToast({ type: "error", title: "Không thể xoá", message: error.message || "Vui lòng thử lại" });
-    }
-  };
+  const filteredPayments = useMemo(() => {
+    const query = String(q || "").trim().toLowerCase();
+    if (!query) return payments || [];
+    const norm = (v) => String(v || "").toLowerCase();
+    return (payments || []).filter((p) => {
+      const booking = p.booking || {};
+      const user = booking.user || {};
+      const pitch = booking.pitch || {};
+      const hay = [
+        p.txnRef,
+        p.providerTxnNo,
+        p.provider,
+        p.status,
+        p.amount,
+        booking.bookingCode,
+        booking.paymentStatus,
+        user.fullName,
+        user.email,
+        user.phone,
+        pitch.name,
+      ]
+        .map(norm)
+        .join(" | ");
+      return hay.includes(query);
+    });
+  }, [payments, q]);
 
   return (
-    <section className="grid two">
-      <form className="card" onSubmit={submit}>
-        <h3 className="card-title">Quản lý giao dịch</h3>
+    <section className="grid two payments">
+      <div className="card payments-search">
+        <h3 className="card-title">Tìm kiếm giao dịch</h3>
         <div className="notice">
-          Thanh toán VNPay được thực hiện trên app khách hàng. Quản trị chỉ dùng để cập nhật trạng thái giao dịch khi cần đối soát.
+          Thanh toán VNPay được thực hiện trên app khách hàng. Tab này chỉ dùng để tra cứu giao dịch.
         </div>
-        {!form.id && <div className="notice">Chọn một giao dịch ở danh sách bên dưới và bấm “Sửa” để cập nhật.</div>}
-        <label>Booking</label>
-        <select value={form.bookingId} disabled>
-          <option value="">{form.id ? "Đã chọn booking" : "Chưa chọn giao dịch"}</option>
-          {bookings.map((b) => <option key={b.id} value={b.id}>{b.bookingCode} - {formatMoney(b.totalPrice)}</option>)}
-        </select>
-        <label>Số tiền</label>
-        <input type="number" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} />
-        <label>Trạng thái</label>
-        <select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
-          <option value="PENDING">PENDING</option>
-          <option value="SUCCESS">SUCCESS</option>
-          <option value="FAILED">FAILED</option>
-        </select>
-        <label>Mã giao dịch nhà cung cấp</label>
-        <input value={form.providerTxnNo} onChange={(e) => setForm({ ...form, providerTxnNo: e.target.value })} />
-        <label>Thanh toán lúc</label>
-        <input type="datetime-local" value={form.paidAt} onChange={(e) => setForm({ ...form, paidAt: e.target.value })} />
+        <label>Từ khoá</label>
+        <input
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder="Tìm theo mã giao dịch / booking / tên khách / email / SĐT / sân / trạng thái..."
+        />
         <div className="form-actions">
-          <button disabled={!form.id}>{form.id ? "Cập nhật" : "Chọn giao dịch để cập nhật"}</button>
-          <button type="button" className="ghost-btn" onClick={resetForm}>Làm mới form</button>
+          <button type="button" className="ghost-btn" onClick={() => setQ("")} disabled={!q}>
+            Xoá tìm kiếm
+          </button>
         </div>
-      </form>
+      </div>
 
       <div className="card">
-        <h3 className="card-title">Danh sách giao dịch</h3>
+        <div className="table-top">
+          <div>
+            <h3 className="card-title">Danh sách giao dịch</h3>
+            <div className="subtitle">Hiển thị {filteredPayments.length} / {(payments || []).length} giao dịch</div>
+          </div>
+        </div>
         <div className="table-wrap">
           <table>
-            <thead><tr><th>Mã</th><th>Booking</th><th>Số tiền</th><th>Trạng thái</th><th>Ngày tạo</th><th>Tác vụ</th></tr></thead>
+            <thead>
+              <tr>
+                <th>Mã</th>
+                <th>Booking</th>
+                <th>Người thanh toán</th>
+                <th>Sân</th>
+                <th>Số tiền</th>
+                <th>Trạng thái</th>
+                <th>Ngày tạo</th>
+              </tr>
+            </thead>
             <tbody>
-              {payments.map((p) => (
+              {filteredPayments.map((p) => (
                 <tr key={p.id}>
                   <td>{p.txnRef}</td>
                   <td>{p.booking?.bookingCode}</td>
+                  <td>
+                    <div style={{ fontWeight: 700 }}>{p.booking?.user?.fullName || "-"}</div>
+                    <div className="muted small">{p.booking?.user?.email || ""}</div>
+                    <div className="muted small">{p.booking?.user?.phone || ""}</div>
+                  </td>
+                  <td>{p.booking?.pitch?.name || "-"}</td>
                   <td>{formatMoney(p.amount)}</td>
                   <td><StatusBadge status={p.status} /></td>
                   <td>{new Date(p.createdAt).toLocaleDateString("vi-VN")}</td>
-                  <td>
-                    <div className="actions-cell">
-                      <button
-                        className="small-btn ghost-btn"
-                        onClick={() =>
-                          setForm({
-                            id: p.id,
-                            bookingId: p.bookingId,
-                            amount: Number(p.amount),
-                            status: p.status,
-                            provider: p.provider,
-                            providerTxnNo: p.providerTxnNo || "",
-                            paidAt: p.paidAt ? new Date(p.paidAt).toISOString().slice(0, 16) : "",
-                          })
-                        }
-                      >
-                        Sửa
-                      </button>
-                      <button className="small-btn danger" onClick={() => handleDelete(p.id)}>Xoá</button>
+                </tr>
+              ))}
+              {!filteredPayments.length && (
+                <tr>
+                  <td colSpan={7}>
+                    <div className="notice" style={{ margin: 0 }}>
+                      Không có giao dịch nào phù hợp.
                     </div>
                   </td>
                 </tr>
-              ))}
+              )}
             </tbody>
           </table>
         </div>

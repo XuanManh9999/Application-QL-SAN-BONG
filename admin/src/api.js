@@ -1,4 +1,5 @@
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000/api/v1";
+const API_ORIGIN = API_BASE_URL.replace(/\/api\/v1\/?$/, "");
 
 const buildHeaders = (token, hasJson = true) => {
   const headers = {};
@@ -8,10 +9,11 @@ const buildHeaders = (token, hasJson = true) => {
 };
 
 const request = async (path, { method = "GET", body, token } = {}) => {
+  const isFormData = typeof FormData !== "undefined" && body instanceof FormData;
   const res = await fetch(`${API_BASE_URL}${path}`, {
     method,
-    headers: buildHeaders(token, body !== undefined),
-    body: body !== undefined ? JSON.stringify(body) : undefined,
+    headers: buildHeaders(token, body !== undefined && !isFormData),
+    body: body !== undefined ? (isFormData ? body : JSON.stringify(body)) : undefined,
   });
 
   const data = await res.json().catch(() => ({}));
@@ -79,6 +81,18 @@ export const api = {
     create: (token, payload) => request("/articles", { method: "POST", token, body: payload }),
     update: (token, id, payload) => request(`/articles/${id}`, { method: "PATCH", token, body: payload }),
     remove: (token, id) => request(`/articles/${id}`, { method: "DELETE", token }),
+  },
+  uploads: {
+    image: async (token, fileOrBlob) => {
+      const fd = new FormData();
+      const name = fileOrBlob?.name || `image-${Date.now()}.png`;
+      fd.append("file", fileOrBlob, name);
+      const res = await request("/uploads/images", { method: "POST", token, body: fd });
+      const rawUrl = res?.data?.url;
+      const path = res?.data?.path;
+      const url = rawUrl || (path ? `${API_ORIGIN}${path}` : "");
+      return { ...res, data: { ...res.data, url } };
+    },
   },
 };
 

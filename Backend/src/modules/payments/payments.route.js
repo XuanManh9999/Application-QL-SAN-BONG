@@ -9,7 +9,6 @@ const router = express.Router();
 router.get("/", protect, authorize("SUPER_ADMIN", "OWNER", "STAFF"), controller.listPayments);
 router.post("/", protect, authorize("SUPER_ADMIN", "OWNER", "STAFF"), validate(createPaymentSchema), controller.createPayment);
 router.patch("/:id", protect, authorize("SUPER_ADMIN", "OWNER", "STAFF"), validate(updatePaymentSchema), controller.updatePayment);
-router.delete("/:id", protect, authorize("SUPER_ADMIN", "OWNER"), controller.deletePayment);
 
 router.post(
   "/vnpay/create-url",
