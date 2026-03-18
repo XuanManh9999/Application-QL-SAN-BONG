@@ -9,8 +9,6 @@ datasource db {
 
 enum Role {
   SUPER_ADMIN
-  OWNER
-  STAFF
   CUSTOMER
 }
 
@@ -78,7 +76,7 @@ model User {
 
 model RefreshToken {
   id        String   @id @default(cuid())
-  token     String   @unique @db.VarChar(1024)
+  tokenHash String   @unique @db.VarChar(64)
   userId    String
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   expiresAt DateTime
@@ -194,7 +192,7 @@ model Article {
   title       String
   slug        String        @unique
   summary     String?
-  content     String
+  content     String        @db.LongText
   coverUrl    String?
   status      ArticleStatus @default(DRAFT)
   authorId    String?

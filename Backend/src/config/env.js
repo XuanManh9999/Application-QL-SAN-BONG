@@ -24,3 +24,10 @@ module.exports = {
   vnpayReturnUrl: process.env.VNPAY_RETURN_URL || "http://localhost:4000/api/v1/payments/vnpay/return",
   vnpayIpnUrl: process.env.VNPAY_IPN_URL || "http://localhost:4000/api/v1/payments/vnpay/ipn",
 };
+
+// Production safety: do not allow default JWT secrets.
+if (module.exports.nodeEnv === "production") {
+  if (module.exports.jwtAccessSecret === "access_secret" || module.exports.jwtRefreshSecret === "refresh_secret") {
+    throw new Error("Missing JWT secrets. Please set JWT_ACCESS_SECRET and JWT_REFRESH_SECRET in production.");
+  }
+}

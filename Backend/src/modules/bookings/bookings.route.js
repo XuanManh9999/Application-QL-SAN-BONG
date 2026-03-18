@@ -6,22 +6,23 @@ const { createBookingSchema, updateBookingStatusSchema, updateBookingSchema } = 
 
 const router = express.Router();
 
-router.get("/", protect, authorize("SUPER_ADMIN", "OWNER", "STAFF"), controller.listBookings);
-router.post("/", protect, authorize("SUPER_ADMIN", "OWNER", "STAFF", "CUSTOMER"), validate(createBookingSchema), controller.createBooking);
+router.get("/", protect, authorize("SUPER_ADMIN", "CUSTOMER"), controller.listBookings);
+router.get("/me", protect, authorize("CUSTOMER"), controller.listMyBookings);
+router.post("/", protect, authorize("SUPER_ADMIN", "CUSTOMER"), validate(createBookingSchema), controller.createBooking);
 router.patch(
   "/:id/status",
   protect,
-  authorize("SUPER_ADMIN", "OWNER", "STAFF"),
+  authorize("SUPER_ADMIN"),
   validate(updateBookingStatusSchema),
   controller.updateBookingStatus
 );
 router.patch(
   "/:id",
   protect,
-  authorize("SUPER_ADMIN", "OWNER", "STAFF"),
+  authorize("SUPER_ADMIN"),
   validate(updateBookingSchema),
   controller.updateBooking
 );
-router.delete("/:id", protect, authorize("SUPER_ADMIN", "OWNER"), controller.deleteBooking);
+router.delete("/:id", protect, authorize("SUPER_ADMIN"), controller.deleteBooking);
 
 module.exports = router;

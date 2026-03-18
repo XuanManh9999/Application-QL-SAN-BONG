@@ -8,8 +8,8 @@ const router = express.Router();
 
 router.get("/", protect, controller.listPitches);
 router.get("/:id", protect, controller.getPitchById);
-router.post("/", protect, authorize("SUPER_ADMIN", "OWNER", "STAFF"), validate(createPitchSchema), controller.createPitch);
-router.patch("/:id", protect, authorize("SUPER_ADMIN", "OWNER", "STAFF"), validate(updatePitchSchema), controller.updatePitch);
-router.delete("/:id", protect, authorize("SUPER_ADMIN", "OWNER"), controller.deletePitch);
+router.post("/", protect, authorize("SUPER_ADMIN"), validate(createPitchSchema), controller.createPitch);
+router.patch("/:id", protect, authorize("SUPER_ADMIN"), validate(updatePitchSchema), controller.updatePitch);
+router.delete("/:id", protect, authorize("SUPER_ADMIN"), controller.deletePitch);
 
 module.exports = router;

@@ -74,10 +74,11 @@ const login = async (email, password) => {
 
   const accessToken = signAccessToken(user);
   const refreshToken = signRefreshToken(user);
+  const refreshTokenHash = sha256(refreshToken);
 
   await prisma.refreshToken.create({
     data: {
-      token: refreshToken,
+      tokenHash: refreshTokenHash,
       userId: user.id,
       expiresAt: parseExpiresInToDate(env.jwtRefreshExpiresIn),
     },
@@ -103,11 +104,12 @@ const refreshAccessToken = async (token) => {
     throw new ApiError(401, "Invalid refresh token");
   }
 
-  const tokenInDb = await prisma.refreshToken.findUnique({ where: { token } });
+  const tokenHash = sha256(token);
+  const tokenInDb = await prisma.refreshToken.findUnique({ where: { tokenHash } });
   if (!tokenInDb) throw new ApiError(401, "Refresh token revoked");
 
   if (tokenInDb.expiresAt < new Date()) {
-    await prisma.refreshToken.deleteMany({ where: { token } });
+    await prisma.refreshToken.deleteMany({ where: { tokenHash } });
     throw new ApiError(401, "Refresh token expired");
   }
 
@@ -118,7 +120,8 @@ const refreshAccessToken = async (token) => {
 };
 
 const logout = async (token) => {
-  await prisma.refreshToken.deleteMany({ where: { token } });
+  const tokenHash = sha256(token);
+  await prisma.refreshToken.deleteMany({ where: { tokenHash } });
 };
 
 const forgotPassword = async (email) => {
@@ -153,6 +156,76 @@ const forgotPassword = async (email) => {
       <p>Nếu bạn không yêu cầu, hãy bỏ qua email này.</p>
     `,
   });
+};
+
+const forgotPasswordOtp = async (email) => {
+  const user = await prisma.user.findUnique({ where: { email } });
+  if (!user) return;
+
+  const otp = String(Math.floor(100000 + Math.random() * 900000)); // 6 digits
+  const tokenHash = sha256(otp);
+  const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+
+  // Clean up any previous unused OTPs for this user
+  await prisma.passwordResetToken.deleteMany({
+    where: {
+      userId: user.id,
+      usedAt: null,
+    },
+  });
+
+  await prisma.passwordResetToken.create({
+    data: {
+      tokenHash,
+      userId: user.id,
+      expiresAt,
+    },
+  });
+
+  await sendMail({
+    to: user.email,
+    subject: "Mã OTP đặt lại mật khẩu - Nền tảng đặt sân bóng",
+    html: `
+      <p>Xin chào ${user.fullName},</p>
+      <p>Mã OTP của bạn là:</p>
+      <h2 style="letter-spacing:2px;">${otp}</h2>
+      <p>Mã có hiệu lực trong <strong>10 phút</strong>.</p>
+      <p>Nếu bạn không yêu cầu, hãy bỏ qua email này.</p>
+    `,
+  });
+};
+
+const resetPasswordOtp = async (email, otp, newPassword) => {
+  const tokenHash = sha256(String(otp).trim());
+
+  const resetToken = await prisma.passwordResetToken.findUnique({
+    where: { tokenHash },
+    include: { user: true },
+  });
+
+  if (!resetToken || resetToken.usedAt || resetToken.expiresAt < new Date()) {
+    throw new ApiError(400, "OTP không hợp lệ hoặc đã hết hạn");
+  }
+
+  if (!resetToken.user || resetToken.user.email !== email) {
+    throw new ApiError(400, "OTP không hợp lệ");
+  }
+
+  const passwordHash = await bcrypt.hash(newPassword, 10);
+
+  await prisma.$transaction([
+    prisma.user.update({
+      where: { id: resetToken.userId },
+      data: { passwordHash },
+    }),
+    prisma.passwordResetToken.update({
+      where: { id: resetToken.id },
+      data: { usedAt: new Date() },
+    }),
+    prisma.refreshToken.deleteMany({
+      where: { userId: resetToken.userId },
+    }),
+  ]);
 };
 
 const resetPassword = async (token, newPassword) => {
@@ -190,5 +263,7 @@ module.exports = {
   refreshAccessToken,
   logout,
   forgotPassword,
+  forgotPasswordOtp,
+  resetPasswordOtp,
   resetPassword,
 };

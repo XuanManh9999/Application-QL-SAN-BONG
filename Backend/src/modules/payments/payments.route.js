@@ -6,14 +6,14 @@ const { createPaymentSchema, updatePaymentSchema, createVnpayPaymentSchema } = r
 
 const router = express.Router();
 
-router.get("/", protect, authorize("SUPER_ADMIN", "OWNER", "STAFF"), controller.listPayments);
-router.post("/", protect, authorize("SUPER_ADMIN", "OWNER", "STAFF"), validate(createPaymentSchema), controller.createPayment);
-router.patch("/:id", protect, authorize("SUPER_ADMIN", "OWNER", "STAFF"), validate(updatePaymentSchema), controller.updatePayment);
+router.get("/", protect, authorize("SUPER_ADMIN"), controller.listPayments);
+router.post("/", protect, authorize("SUPER_ADMIN"), validate(createPaymentSchema), controller.createPayment);
+router.patch("/:id", protect, authorize("SUPER_ADMIN"), validate(updatePaymentSchema), controller.updatePayment);
 
 router.post(
   "/vnpay/create-url",
   protect,
-  authorize("SUPER_ADMIN", "OWNER", "STAFF"),
+  authorize("SUPER_ADMIN", "CUSTOMER"),
   validate(createVnpayPaymentSchema),
   controller.createVnpayUrl
 );

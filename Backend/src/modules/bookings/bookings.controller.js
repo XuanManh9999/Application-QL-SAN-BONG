@@ -95,6 +95,32 @@ const createBooking = asyncHandler(async (req, res) => {
 const listBookings = asyncHandler(async (req, res) => {
   const { date, pitchId, status } = req.query;
 
+  // Customer app: allow checking availability by date + pitchId.
+  // Return minimal booking info to compute free time slots.
+  if (req.user?.role === "CUSTOMER") {
+    if (!date || !pitchId) {
+      throw new ApiError(400, "date and pitchId are required for customer availability");
+    }
+    const where = {
+      bookingDate: new Date(`${date}T00:00:00.000Z`),
+      pitchId: String(pitchId),
+      status: { in: ["PENDING", "CONFIRMED"] },
+    };
+
+    const bookings = await prisma.booking.findMany({
+      where,
+      select: {
+        id: true,
+        startTime: true,
+        endTime: true,
+        status: true,
+      },
+      orderBy: [{ startTime: "asc" }],
+    });
+
+    return res.json({ success: true, data: bookings });
+  }
+
   const where = {};
 
   if (date) {
@@ -131,6 +157,41 @@ const listBookings = asyncHandler(async (req, res) => {
       },
     },
     orderBy: [{ bookingDate: "asc" }, { startTime: "asc" }],
+  });
+
+  res.json({ success: true, data: bookings });
+});
+
+const listMyBookings = asyncHandler(async (req, res) => {
+  const where = { userId: req.user.id };
+  const bookings = await prisma.booking.findMany({
+    where,
+    include: {
+      pitch: {
+        select: {
+          id: true,
+          name: true,
+          pitchType: true,
+          basePrice: true,
+          venue: { select: { id: true, name: true, address: true } },
+        },
+      },
+      promotion: { select: { id: true, code: true, type: true, value: true } },
+      paymentTransactions: {
+        select: {
+          id: true,
+          provider: true,
+          status: true,
+          amount: true,
+          txnRef: true,
+          providerTxnNo: true,
+          paidAt: true,
+          createdAt: true,
+        },
+        orderBy: { createdAt: "desc" },
+      },
+    },
+    orderBy: [{ bookingDate: "desc" }, { startTime: "desc" }],
   });
 
   res.json({ success: true, data: bookings });
@@ -227,6 +288,7 @@ const deleteBooking = asyncHandler(async (req, res) => {
 module.exports = {
   createBooking,
   listBookings,
+  listMyBookings,
   updateBookingStatus,
   updateBooking,
   deleteBooking,

@@ -22,37 +22,7 @@ async function main() {
     },
   });
 
-  const owner = await prisma.user.upsert({
-    where: { email: "owner@football.local" },
-    update: {
-      fullName: "Chủ sân Nguyễn An",
-      role: Role.OWNER,
-      isActive: true,
-    },
-    create: {
-      fullName: "Chủ sân Nguyễn An",
-      email: "owner@football.local",
-      passwordHash,
-      role: Role.OWNER,
-      isActive: true,
-    },
-  });
-
-  await prisma.user.upsert({
-    where: { email: "staff@football.local" },
-    update: {
-      fullName: "Nhân viên Lê Minh",
-      role: Role.STAFF,
-      isActive: true,
-    },
-    create: {
-      fullName: "Nhân viên Lê Minh",
-      email: "staff@football.local",
-      passwordHash,
-      role: Role.STAFF,
-      isActive: true,
-    },
-  });
+  // Trước đây có OWNER/STAFF; hiện hệ thống chỉ dùng SUPER_ADMIN (Admin) và CUSTOMER.
 
   const customer = await prisma.user.upsert({
     where: { email: "customer@football.local" },
@@ -416,7 +386,7 @@ async function main() {
         "<h2>Chọn đinh giày</h2><p>Sân cỏ nhân tạo phù hợp nhất với <strong>TF</strong> (đinh dăm) và một số loại <strong>AG</strong>.</p><h3>Checklist nhanh</h3><ul><li>Form vừa chân</li><li>Đế bám tốt</li><li>Vớ dày vừa đủ</li></ul><pre><code>// Gợi ý: lau sạch đế sau mỗi trận\n</code></pre>",
       coverUrl: "https://images.unsplash.com/photo-1521412644187-c49fa049e84d",
       status: ArticleStatus.PUBLISHED,
-      authorId: owner.id,
+      authorId: admin.id,
       publishedAt: new Date(Date.now() - 86400000 * 1),
     },
   });
@@ -431,7 +401,7 @@ async function main() {
       content: "Chọn cụm sân, thời gian, áp mã giảm giá và nhận xác nhận ngay sau khi thanh toán.",
       coverUrl: "https://images.unsplash.com/photo-1508098682722-e99c43a406b2",
       status: ArticleStatus.PUBLISHED,
-      authorId: owner.id,
+      authorId: admin.id,
       publishedAt: new Date(Date.now() - 86400000 * 2),
     },
   });

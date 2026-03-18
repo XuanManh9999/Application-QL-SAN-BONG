@@ -9,15 +9,33 @@ const sortObject = (obj) => {
   return sorted;
 };
 
-const buildQueryString = (obj) => {
+// Encode VALUE only (VNPay hash rules), then replace %20 -> +
+const encodeVnpayValue = (value) => encodeURIComponent(String(value)).replace(/%20/g, "+");
+
+/**
+ * Build hash data string for VNPay:
+ * - Keys sorted alphabetically
+ * - DO NOT encode key
+ * - Encode VALUE only (like urllib.parse.quote(...).replace('%20','+'))
+ * - Exclude empty values
+ */
+const buildHashDataString = (obj) => {
   return Object.keys(obj)
-    .map((key) => `${encodeURIComponent(key)}=${encodeURIComponent(obj[key]).replace(/%20/g, "+")}`)
+    .filter((k) => obj[k] !== undefined && obj[k] !== null && String(obj[k]).length > 0)
+    .map((key) => `${key}=${encodeVnpayValue(obj[key])}`)
+    .join("&");
+};
+
+// Query string for redirect URL (encode both key & value is OK; keys are safe anyway)
+const buildQueryStringEncoded = (obj) => {
+  return Object.keys(obj)
+    .map((key) => `${encodeURIComponent(key)}=${encodeVnpayValue(obj[key])}`)
     .join("&");
 };
 
 const createSecureHash = (params, secret) => {
   const sorted = sortObject(params);
-  const signData = buildQueryString(sorted);
+  const signData = buildHashDataString(sorted);
   return crypto.createHmac("sha512", secret).update(Buffer.from(signData, "utf-8")).digest("hex");
 };
 
@@ -33,6 +51,7 @@ const formatDateTime = (date = new Date()) => {
 
 module.exports = {
   createSecureHash,
-  buildQueryString,
+  buildQueryStringEncoded,
+  buildHashDataString,
   formatDateTime,
 };

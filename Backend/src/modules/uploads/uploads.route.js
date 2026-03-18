@@ -37,7 +37,7 @@ const upload = multer({
   },
 });
 
-router.post("/images", protect, authorize("SUPER_ADMIN", "OWNER", "STAFF"), upload.single("file"), (req, res, next) => {
+router.post("/images", protect, authorize("SUPER_ADMIN"), upload.single("file"), (req, res, next) => {
   try {
     if (!req.file) throw new ApiError(400, "Missing file");
     const pathUrl = `/uploads/${req.file.filename}`;

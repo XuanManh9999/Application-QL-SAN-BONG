@@ -103,6 +103,27 @@ const updateUser = asyncHandler(async (req, res) => {
   res.json({ success: true, data: updated });
 });
 
+const updateMe = asyncHandler(async (req, res) => {
+  const updated = await prisma.user.update({
+    where: { id: req.user.id },
+    data: {
+      ...(req.body.fullName !== undefined ? { fullName: req.body.fullName } : {}),
+      ...(req.body.phone !== undefined ? { phone: req.body.phone } : {}),
+    },
+    select: {
+      id: true,
+      fullName: true,
+      email: true,
+      phone: true,
+      role: true,
+      isActive: true,
+      createdAt: true,
+    },
+  });
+
+  res.json({ success: true, data: updated });
+});
+
 const deleteUser = asyncHandler(async (req, res) => {
   const existing = await prisma.user.findUnique({ where: { id: req.params.id } });
   if (!existing) return res.status(404).json({ success: false, message: "User not found" });
@@ -113,6 +134,7 @@ const deleteUser = asyncHandler(async (req, res) => {
 
 module.exports = {
   me,
+  updateMe,
   listUsers,
   createUser,
   updateUser,

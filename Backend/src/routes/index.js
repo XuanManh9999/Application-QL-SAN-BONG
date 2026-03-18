@@ -9,6 +9,7 @@ const promotionRoutes = require("../modules/promotions/promotions.route");
 const paymentRoutes = require("../modules/payments/payments.route");
 const articleRoutes = require("../modules/articles/articles.route");
 const uploadRoutes = require("../modules/uploads/uploads.route");
+const publicRoutes = require("../modules/public/public.route");
 
 const router = express.Router();
 
@@ -25,5 +26,6 @@ router.use("/promotions", promotionRoutes);
 router.use("/payments", paymentRoutes);
 router.use("/articles", articleRoutes);
 router.use("/uploads", uploadRoutes);
+router.use("/public", publicRoutes);
 
 module.exports = router;

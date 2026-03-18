@@ -127,15 +127,27 @@ function MarkdownProEditor({ token, value, onChange, onUploadError }) {
       initialValue: value || "",
       hooks: {
         addImageBlobHook: async (blob, callback) => {
-          // Upload and insert URL (clean content, stable rendering)
+          // Chuyển ảnh sang base64 (data URL) và nhúng trực tiếp vào nội dung
           try {
-            const res = await api.uploads.image(token, blob);
-            const url = res?.data?.url;
-            if (!url) throw new Error("Upload failed");
-            callback(url, blob?.name || "image");
-          } catch {
+            const file = blob;
+            const reader = new FileReader();
+            reader.onloadend = () => {
+              const result = reader.result;
+              if (typeof result === "string" && result.startsWith("data:")) {
+                callback(result, file?.name || "image");
+              } else {
+                callback("", "");
+                onUploadError?.(new Error("Không thể đọc file ảnh"));
+              }
+            };
+            reader.onerror = () => {
+              callback("", "");
+              onUploadError?.(new Error("Không thể đọc file ảnh"));
+            };
+            reader.readAsDataURL(file);
+          } catch (e) {
             callback("", "");
-            onUploadError?.(new Error("Không thể upload ảnh. Vui lòng kiểm tra Backend đang chạy và bạn đã đăng nhập."));
+            onUploadError?.(e instanceof Error ? e : new Error("Không thể xử lý ảnh"));
           }
           return false;
         },
@@ -407,9 +419,9 @@ function App() {
 export default App;
 
 function LoginScreen({ onLogin, pushToast, setLoading, loading }) {
-  const [email, setEmail] = useState("admin@football.local");
-  const [password, setPassword] = useState("Admin@123");
-  const [forgotEmail, setForgotEmail] = useState("admin@football.local");
+  const [email, setEmail] = useState(import.meta.env.VITE_ADMIN_DEFAULT_EMAIL || "");
+  const [password, setPassword] = useState(import.meta.env.VITE_ADMIN_DEFAULT_PASSWORD || "");
+  const [forgotEmail, setForgotEmail] = useState(import.meta.env.VITE_ADMIN_DEFAULT_EMAIL || "");
 
   const submit = async (e) => {
     e.preventDefault();
@@ -850,7 +862,8 @@ function UsersPanel({ token, users, setUsers, pushToast }) {
         setUsers((prev) => prev.map((u) => (u.id === form.id ? res.data : u)));
         pushToast({ type: "success", title: "Đã cập nhật", message: "Người dùng đã được lưu" });
       } else {
-        const pwd = form.password || "Password@123";
+        const pwd = form.password;
+        if (!pwd) throw new Error("Vui lòng nhập mật khẩu");
         if (String(pwd).length < 8) throw new Error("Mật khẩu phải có ít nhất 8 ký tự");
         const res = await api.users.create(token, {
           fullName: form.fullName,
@@ -893,9 +906,7 @@ function UsersPanel({ token, users, setUsers, pushToast }) {
         <input type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />
         <label>Vai trò</label>
         <select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>
-          <option value="SUPER_ADMIN">SUPER_ADMIN</option>
-          <option value="OWNER">OWNER</option>
-          <option value="STAFF">STAFF</option>
+          <option value="SUPER_ADMIN">ADMIN</option>
           <option value="CUSTOMER">CUSTOMER</option>
         </select>
         <label>Trạng thái</label>
@@ -1549,6 +1560,7 @@ function SchedulePanel({ token, venues, pitches, users, promotions, setBookings,
   const [venueId, setVenueId] = useState("");
   const [pitchId, setPitchId] = useState("");
   const [selected, setSelected] = useState(null);
+  const [detail, setDetail] = useState(null);
   const [creating, setCreating] = useState(false);
   const [scheduleBookings, setScheduleBookings] = useState([]);
   const [scheduleLoading, setScheduleLoading] = useState(false);
@@ -1680,6 +1692,20 @@ function SchedulePanel({ token, venues, pitches, users, promotions, setBookings,
     }
   };
 
+  const openDetail = (booking) => {
+    if (!booking) return;
+    setDetail(booking);
+  };
+
+  const closeDetail = () => setDetail(null);
+
+  const detailPitch = useMemo(() => {
+    if (!detail?.pitchId) return null;
+    return (pitches || []).find((p) => p.id === detail.pitchId) || detail.pitch || null;
+  }, [detail, pitches]);
+
+  const detailUser = detail?.user || (detail?.userId ? (users || []).find((u) => u.id === detail.userId) : null) || null;
+
   return (
     <section className="schedule">
       <div className="schedule-toolbar card">
@@ -1757,7 +1783,7 @@ function SchedulePanel({ token, venues, pitches, users, promotions, setBookings,
                             ? "cell slot selected"
                             : "cell slot"
                       }
-                      onClick={() => (!hit ? pickSlot(p, t) : null)}
+                      onClick={() => (!hit ? pickSlot(p, t) : openDetail(hit))}
                       role="button"
                       tabIndex={0}
                     >
@@ -1890,6 +1916,85 @@ function SchedulePanel({ token, venues, pitches, users, promotions, setBookings,
           )}
         </div>
       </div>
+
+      {detail ? (
+        <div className="modal-backdrop" role="dialog" aria-modal="true" onMouseDown={closeDetail}>
+          <div className="modal" onMouseDown={(e) => e.stopPropagation()}>
+            <div className="modal-head">
+              <div>
+                <div className="modal-title">Chi tiết booking</div>
+                <div className="modal-sub">{detail.bookingCode || detail.id}</div>
+              </div>
+              <button type="button" className="ghost-btn small-btn" onClick={closeDetail}>
+                Đóng
+              </button>
+            </div>
+
+            <div className="modal-grid">
+              <div className="modal-item">
+                <div className="k">Sân</div>
+                <div className="v">{detailPitch?.name || detail.pitch?.name || detail.pitchId}</div>
+              </div>
+              <div className="modal-item">
+                <div className="k">Loại sân</div>
+                <div className="v">{detailPitch?.pitchType || "-"}</div>
+              </div>
+              <div className="modal-item">
+                <div className="k">Ngày</div>
+                <div className="v">{detail.bookingDate ? new Date(detail.bookingDate).toLocaleDateString("vi-VN") : date}</div>
+              </div>
+              <div className="modal-item">
+                <div className="k">Khung giờ</div>
+                <div className="v">
+                  {detail.startTime} - {detail.endTime}
+                </div>
+              </div>
+
+              <div className="modal-item span-2">
+                <div className="k">Khách</div>
+                <div className="v">
+                  <div style={{ fontWeight: 800 }}>{detailUser?.fullName || "-"}</div>
+                  <div className="muted small">{detailUser?.email || ""}</div>
+                  <div className="muted small">{detailUser?.phone || ""}</div>
+                </div>
+              </div>
+
+              <div className="modal-item">
+                <div className="k">Trạng thái</div>
+                <div className="v">
+                  <StatusBadge status={detail.status} />
+                </div>
+              </div>
+              <div className="modal-item">
+                <div className="k">Thanh toán</div>
+                <div className="v">
+                  <StatusBadge status={detail.paymentStatus} />
+                </div>
+              </div>
+
+              <div className="modal-item">
+                <div className="k">Tạm tính</div>
+                <div className="v">{formatMoney(detail.subtotalPrice)}</div>
+              </div>
+              <div className="modal-item">
+                <div className="k">Giảm giá</div>
+                <div className="v">{formatMoney(detail.discountAmount)}</div>
+              </div>
+              <div className="modal-item span-2">
+                <div className="k">Tổng</div>
+                <div className="v" style={{ fontWeight: 900 }}>{formatMoney(detail.totalPrice)}</div>
+              </div>
+
+              {detail.note ? (
+                <div className="modal-item span-2">
+                  <div className="k">Ghi chú</div>
+                  <div className="v">{detail.note}</div>
+                </div>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }

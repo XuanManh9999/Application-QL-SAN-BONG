@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="utf-8"?>
+<navigation xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/nav_graph"
+    app:startDestination="@id/loginFragment">
+
+    <fragment
+        android:id="@+id/loginFragment"
+        android:name="com.example.app_ql_san_bong.ui.auth.LoginFragment"
+        android:label="Đăng nhập">
+        <action
+            android:id="@+id/action_login_to_register"
+            app:destination="@id/registerFragment" />
+        <action
+            android:id="@+id/action_login_to_forgot"
+            app:destination="@id/forgotPasswordFragment" />
+        <action
+            android:id="@+id/action_login_to_home"
+            app:destination="@id/homeFragment"
+            app:popUpTo="@id/loginFragment"
+            app:popUpToInclusive="true" />
+    </fragment>
+
+    <fragment
+        android:id="@+id/registerFragment"
+        android:name="com.example.app_ql_san_bong.ui.auth.RegisterFragment"
+        android:label="Đăng ký" />
+
+    <fragment
+        android:id="@+id/forgotPasswordFragment"
+        android:name="com.example.app_ql_san_bong.ui.auth.ForgotPasswordFragment"
+        android:label="Quên mật khẩu" />
+
+    <fragment
+        android:id="@+id/homeFragment"
+        android:name="com.example.app_ql_san_bong.ui.home.HomeFragment"
+        android:label="Home" />
+
+    <fragment
+        android:id="@+id/bookingsFragment"
+        android:name="com.example.app_ql_san_bong.ui.booking.BookingsFragment"
+        android:label="Đặt sân" />
+
+    <fragment
+        android:id="@+id/historyFragment"
+        android:name="com.example.app_ql_san_bong.ui.history.HistoryFragment"
+        android:label="Lịch sử" />
+
+    <fragment
+        android:id="@+id/profileFragment"
+        android:name="com.example.app_ql_san_bong.ui.profile.ProfileFragment"
+        android:label="Cá nhân" />
+
+    <fragment
+        android:id="@+id/articlesFragment"
+        android:name="com.example.app_ql_san_bong.ui.articles.ArticlesFragment"
+        android:label="Bài viết" />
+
+    <fragment
+        android:id="@+id/promotionsFragment"
+        android:name="com.example.app_ql_san_bong.ui.promotions.PromotionsFragment"
+        android:label="Mã giảm giá" />
+
+    <fragment
+        android:id="@+id/articleDetailFragment"
+        android:name="com.example.app_ql_san_bong.ui.articles.ArticleDetailFragment"
+        android:label="Chi tiết bài viết">
+        <argument
+            android:name="articleId"
+            app:argType="string" />
+    </fragment>
+
+    <fragment
+        android:id="@+id/paymentFragment"
+        android:name="com.example.app_ql_san_bong.ui.payments.PaymentFragment"
+        android:label="Thanh toán">
+        <argument
+            android:name="bookingId"
+            app:argType="string" />
+        <argument
+            android:name="baseAmount"
+            app:argType="float" />
+    </fragment>
+
+    <fragment
+        android:id="@+id/vnpayWebViewFragment"
+        android:name="com.example.app_ql_san_bong.ui.payments.VnpayWebViewFragment"
+        android:label="Thanh toán">
+        <argument
+            android:name="payUrl"
+            app:argType="string" />
+    </fragment>
+
+</navigation>
+

@@ -29,6 +29,19 @@ const forgotPassword = asyncHandler(async (req, res) => {
   });
 });
 
+const forgotPasswordOtp = asyncHandler(async (req, res) => {
+  await authService.forgotPasswordOtp(req.body.email);
+  res.json({
+    success: true,
+    message: "Nếu email tồn tại, hệ thống đã gửi mã OTP đặt lại mật khẩu",
+  });
+});
+
+const resetPasswordOtp = asyncHandler(async (req, res) => {
+  await authService.resetPasswordOtp(req.body.email, req.body.otp, req.body.newPassword);
+  res.json({ success: true, message: "Đổi mật khẩu thành công" });
+});
+
 const resetPassword = asyncHandler(async (req, res) => {
   await authService.resetPassword(req.body.token, req.body.newPassword);
   res.json({ success: true, message: "Đặt lại mật khẩu thành công" });
@@ -40,5 +53,7 @@ module.exports = {
   refresh,
   logout,
   forgotPassword,
+  forgotPasswordOtp,
+  resetPasswordOtp,
   resetPassword,
 };

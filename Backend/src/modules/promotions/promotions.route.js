@@ -6,10 +6,11 @@ const { createPromotionSchema, updatePromotionSchema, applyPromotionSchema } = r
 
 const router = express.Router();
 
-router.get("/", protect, authorize("SUPER_ADMIN", "OWNER", "STAFF"), controller.listPromotions);
-router.post("/", protect, authorize("SUPER_ADMIN", "OWNER"), validate(createPromotionSchema), controller.createPromotion);
-router.patch("/:id", protect, authorize("SUPER_ADMIN", "OWNER"), validate(updatePromotionSchema), controller.updatePromotion);
-router.delete("/:id", protect, authorize("SUPER_ADMIN", "OWNER"), controller.deletePromotion);
-router.post("/apply", protect, validate(applyPromotionSchema), controller.applyPromotion);
+router.get("/", protect, authorize("SUPER_ADMIN"), controller.listPromotions);
+router.get("/available", protect, authorize("SUPER_ADMIN", "CUSTOMER"), controller.listPromotions);
+router.post("/", protect, authorize("SUPER_ADMIN"), validate(createPromotionSchema), controller.createPromotion);
+router.patch("/:id", protect, authorize("SUPER_ADMIN"), validate(updatePromotionSchema), controller.updatePromotion);
+router.delete("/:id", protect, authorize("SUPER_ADMIN"), controller.deletePromotion);
+router.post("/apply", protect, authorize("SUPER_ADMIN", "CUSTOMER"), validate(applyPromotionSchema), controller.applyPromotion);
 
 module.exports = router;
