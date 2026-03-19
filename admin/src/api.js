@@ -28,6 +28,7 @@ export const api = {
   auth: {
     login: (payload) => request("/auth/login", { method: "POST", body: payload }),
     forgotPassword: (payload) => request("/auth/forgot-password", { method: "POST", body: payload }),
+    resetPassword: (payload) => request("/auth/reset-password", { method: "POST", body: payload }),
     me: (token) => request("/users/me", { token }),
   },
   venues: {

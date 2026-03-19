@@ -2,6 +2,13 @@ const dotenv = require("dotenv");
 
 dotenv.config();
 
+const stripWrappedQuotes = (v) => {
+  if (v === undefined || v === null) return "";
+  const s = String(v).trim();
+  // dotenv 有时会保留引号；把一层包裹引号去掉，避免参与签名造成 “Sai chữ ký”
+  return s.replace(/^"(.*)"$/, "$1").replace(/^'(.*)'$/, "$1").trim();
+};
+
 module.exports = {
   port: Number(process.env.PORT || 4000),
   nodeEnv: process.env.NODE_ENV || "development",
@@ -18,11 +25,11 @@ module.exports = {
   smtpUser: process.env.SMTP_USER,
   smtpPass: process.env.SMTP_PASS,
   smtpFrom: process.env.SMTP_FROM || "no-reply@football-booking.local",
-  vnpayTmnCode: process.env.VNPAY_TMN_CODE || "",
-  vnpayHashSecret: process.env.VNPAY_HASH_SECRET || "",
-  vnpayUrl: process.env.VNPAY_URL || "https://sandbox.vnpayment.vn/paymentv2/vpcpay.html",
-  vnpayReturnUrl: process.env.VNPAY_RETURN_URL || "http://localhost:4000/api/v1/payments/vnpay/return",
-  vnpayIpnUrl: process.env.VNPAY_IPN_URL || "http://localhost:4000/api/v1/payments/vnpay/ipn",
+  vnpayTmnCode: stripWrappedQuotes(process.env.VNPAY_TMN_CODE),
+  vnpayHashSecret: stripWrappedQuotes(process.env.VNPAY_HASH_SECRET),
+  vnpayUrl: stripWrappedQuotes(process.env.VNPAY_URL) || "https://sandbox.vnpayment.vn/paymentv2/vpcpay.html",
+  vnpayReturnUrl: stripWrappedQuotes(process.env.VNPAY_RETURN_URL) || "http://localhost:4000/api/v1/payments/vnpay/return",
+  vnpayIpnUrl: stripWrappedQuotes(process.env.VNPAY_IPN_URL) || "http://localhost:4000/api/v1/payments/vnpay/ipn",
 };
 
 // Production safety: do not allow default JWT secrets.

@@ -246,6 +246,20 @@ function App() {
   const token = auth?.accessToken;
   const user = auth?.user;
 
+  const isResetPasswordRoute = useMemo(() => {
+    if (typeof window === "undefined") return false;
+    const path = String(window.location?.pathname || "/");
+    return path === "/reset-password" || path.startsWith("/reset-password/");
+  }, []);
+
+  const pushToast = useCallback((payload) => {
+    const id = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    setToasts((prev) => [{ id, ...payload }, ...prev]);
+    setTimeout(() => {
+      setToasts((prev) => prev.filter((item) => item.id !== id));
+    }, payload.duration || 3200);
+  }, []);
+
   const stats = useMemo(() => {
     const revenue = bookings.reduce((sum, b) => sum + Number(b.totalPrice || 0), 0);
     return {
@@ -261,16 +275,14 @@ function App() {
 
   useEffect(() => {
     if (!auth) return;
+    if (auth?.user?.role !== "SUPER_ADMIN") {
+      setAuth(null);
+      localStorage.removeItem("admin_auth");
+      pushToast({ type: "error", title: "Không có quyền", message: "Chỉ tài khoản ADMIN mới được vào trang quản trị" });
+      return;
+    }
     localStorage.setItem("admin_auth", JSON.stringify(auth));
-  }, [auth]);
-
-  const pushToast = useCallback((payload) => {
-    const id = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-    setToasts((prev) => [{ id, ...payload }, ...prev]);
-    setTimeout(() => {
-      setToasts((prev) => prev.filter((item) => item.id !== id));
-    }, payload.duration || 3200);
-  }, []);
+  }, [auth, pushToast]);
 
   const callWithToast = useCallback(async (fn, successText) => {
     try {
@@ -342,7 +354,11 @@ function App() {
   if (!token) {
     return (
       <>
-        <LoginScreen onLogin={setAuth} pushToast={pushToast} setLoading={setLoading} loading={loading} />
+        {isResetPasswordRoute ? (
+          <ResetPasswordScreen pushToast={pushToast} setLoading={setLoading} loading={loading} />
+        ) : (
+          <LoginScreen onLogin={setAuth} pushToast={pushToast} setLoading={setLoading} loading={loading} />
+        )}
         <ToastStack toasts={toasts} onClose={(id) => setToasts((prev) => prev.filter((t) => t.id !== id))} />
       </>
     );
@@ -428,6 +444,10 @@ function LoginScreen({ onLogin, pushToast, setLoading, loading }) {
     try {
       setLoading(true);
       const res = await api.auth.login({ email, password });
+      const role = res?.data?.user?.role;
+      if (role !== "SUPER_ADMIN") {
+        throw new Error("Chỉ tài khoản ADMIN mới được vào trang quản trị");
+      }
       onLogin(res.data);
       pushToast({ type: "success", title: "Thành công", message: "Đăng nhập thành công" });
     } catch (e) {
@@ -468,6 +488,68 @@ function LoginScreen({ onLogin, pushToast, setLoading, loading }) {
         <label>Quên mật khẩu (email)</label>
         <input value={forgotEmail} onChange={(e) => setForgotEmail(e.target.value)} />
         <button type="button" className="ghost-btn" onClick={sendForgot}>Gửi mail reset</button>
+      </form>
+    </div>
+  );
+}
+
+function ResetPasswordScreen({ pushToast, setLoading, loading }) {
+  const [pwd, setPwd] = useState("");
+  const [pwd2, setPwd2] = useState("");
+  const [done, setDone] = useState(false);
+
+  const token = useMemo(() => {
+    try {
+      const sp = new URLSearchParams(window.location.search || "");
+      return sp.get("token") || "";
+    } catch {
+      return "";
+    }
+  }, []);
+
+  const backToLogin = () => {
+    try {
+      window.history.replaceState({}, "", "/");
+    } catch {}
+    window.location.reload();
+  };
+
+  const submit = async (e) => {
+    e.preventDefault();
+    try {
+      if (!token || token.length < 10) throw new Error("Link không hợp lệ hoặc đã hết hạn");
+      if (!pwd || pwd.length < 6) throw new Error("Mật khẩu tối thiểu 6 ký tự");
+      if (pwd !== pwd2) throw new Error("Mật khẩu nhập lại không khớp");
+      setLoading(true);
+      await api.auth.resetPassword({ token, newPassword: pwd });
+      setDone(true);
+      pushToast({ type: "success", title: "Thành công", message: "Đặt lại mật khẩu thành công. Bạn có thể đăng nhập lại." });
+    } catch (e) {
+      pushToast({ type: "error", title: "Không thể đặt lại mật khẩu", message: e.message || "Vui lòng thử lại" });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="auth-wrap">
+      <form className="card" onSubmit={submit}>
+        <h2 className="auth-title">Đặt lại mật khẩu</h2>
+        <p className="auth-subtitle">Nhập mật khẩu mới để hoàn tất quá trình khôi phục.</p>
+
+        <label>Mật khẩu mới</label>
+        <input type="password" value={pwd} onChange={(e) => setPwd(e.target.value)} />
+
+        <label>Nhập lại mật khẩu</label>
+        <input type="password" value={pwd2} onChange={(e) => setPwd2(e.target.value)} />
+
+        <button type="submit" disabled={loading || done}>
+          {done ? "Đã đặt lại" : loading ? "Đang xử lý..." : "Xác nhận"}
+        </button>
+
+        <button type="button" className="ghost-btn" onClick={backToLogin} style={{ marginTop: 10 }}>
+          Quay lại đăng nhập
+        </button>
       </form>
     </div>
   );
