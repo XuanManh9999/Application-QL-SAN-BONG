@@ -91,5 +91,21 @@
             app:argType="string" />
     </fragment>
 
+    <fragment
+        android:id="@+id/paymentResultFragment"
+        android:name="com.example.app_ql_san_bong.ui.payments.PaymentResultFragment"
+        android:label="Kết quả thanh toán">
+        <argument
+            android:name="paymentSuccess"
+            app:argType="boolean" />
+        <argument
+            android:name="paymentMessage"
+            app:argType="string" />
+        <argument
+            android:name="txnRef"
+            app:argType="string"
+            android:defaultValue="" />
+    </fragment>
+
 </navigation>
 

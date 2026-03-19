@@ -4,6 +4,11 @@ const ApiError = require("../../utils/apiError");
 const { buildBookingCode, isOverlap } = require("../../utils/booking");
 const { validatePromotion } = require("../promotions/promotions.service");
 
+const ACTIVE_BOOKING_WHERE = {
+  status: "CONFIRMED",
+  paymentStatus: "PAID",
+};
+
 const createBooking = asyncHandler(async (req, res) => {
   const { pitchId, bookingDate, startTime, endTime, subtotalPrice, promotionCode, note, userId } = req.body;
 
@@ -33,7 +38,7 @@ const createBooking = asyncHandler(async (req, res) => {
     where: {
       pitchId,
       bookingDate: date,
-      status: { in: ["PENDING", "CONFIRMED"] },
+      ...ACTIVE_BOOKING_WHERE,
     },
     select: {
       startTime: true,
@@ -104,7 +109,7 @@ const listBookings = asyncHandler(async (req, res) => {
     const where = {
       bookingDate: new Date(`${date}T00:00:00.000Z`),
       pitchId: String(pitchId),
-      status: { in: ["PENDING", "CONFIRMED"] },
+      ...ACTIVE_BOOKING_WHERE,
     };
 
     const bookings = await prisma.booking.findMany({
@@ -201,14 +206,16 @@ const updateBookingStatus = asyncHandler(async (req, res) => {
   const existing = await prisma.booking.findUnique({ where: { id: req.params.id } });
   if (!existing) throw new ApiError(404, "Booking not found");
 
-  // Prevent confirming/pending an overlapping booking (server-side guarantee).
-  if (["PENDING", "CONFIRMED"].includes(req.body.status)) {
+  // Chỉ chặn overlap nếu booking được cập nhật thành trạng thái đã thanh toán thành công.
+  const nextStatus = req.body.status || existing.status;
+  const nextPaymentStatus = req.body.paymentStatus || existing.paymentStatus;
+  if (nextStatus === "CONFIRMED" && nextPaymentStatus === "PAID") {
     const others = await prisma.booking.findMany({
       where: {
         id: { not: existing.id },
         pitchId: existing.pitchId,
         bookingDate: existing.bookingDate,
-        status: { in: ["PENDING", "CONFIRMED"] },
+        ...ACTIVE_BOOKING_WHERE,
       },
       select: { startTime: true, endTime: true },
     });
@@ -239,24 +246,26 @@ const updateBooking = asyncHandler(async (req, res) => {
     delete data.promotionCode;
   }
 
-  // Server-side overlap protection when changing time/date/pitch and the booking is (or becomes) active.
+  // Server-side overlap protection when changing time/date/pitch.
+  // Chỉ coi là active khi CONFIRMED + PAID.
   const nextPitchId = data.pitchId || existing.pitchId;
   const nextBookingDate = data.bookingDate || existing.bookingDate;
   const nextStartTime = data.startTime || existing.startTime;
   const nextEndTime = data.endTime || existing.endTime;
   const nextStatus = data.status || existing.status;
+  const nextPaymentStatus = data.paymentStatus || existing.paymentStatus;
 
   if (nextStartTime >= nextEndTime) {
     throw new ApiError(400, "startTime must be earlier than endTime");
   }
 
-  if (["PENDING", "CONFIRMED"].includes(nextStatus)) {
+  if (nextStatus === "CONFIRMED" && nextPaymentStatus === "PAID") {
     const others = await prisma.booking.findMany({
       where: {
         id: { not: existing.id },
         pitchId: nextPitchId,
         bookingDate: nextBookingDate,
-        status: { in: ["PENDING", "CONFIRMED"] },
+        ...ACTIVE_BOOKING_WHERE,
       },
       select: { startTime: true, endTime: true },
     });

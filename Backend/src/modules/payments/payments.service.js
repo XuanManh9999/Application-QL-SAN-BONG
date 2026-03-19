@@ -1,7 +1,22 @@
 const prisma = require("../../config/prisma");
 const env = require("../../config/env");
 const ApiError = require("../../utils/apiError");
-const { createSecureHash, buildQueryStringEncoded, formatDateTime } = require("../../utils/vnpay");
+const { createSecureHash, buildQueryStringEncoded, buildHashDataString, formatDateTime } = require("../../utils/vnpay");
+
+const isVnpayDebug = process.env.VNPAY_DEBUG === "true" || env.nodeEnv !== "production";
+
+const maskSecret = (secret) => {
+  const s = String(secret || "");
+  if (s.length <= 8) return "****";
+  return `${s.slice(0, 4)}...${s.slice(-4)}`;
+};
+
+const logVnpayDebug = (label, data) => {
+  if (!isVnpayDebug) return;
+  try {
+    console.log(`[VNPAY_DEBUG] ${label}`, data);
+  } catch (_) {}
+};
 
 const buildClientIp = (req) => {
   const forwarded = req.headers["x-forwarded-for"];
@@ -18,6 +33,19 @@ const buildClientIp = (req) => {
   return raw;
 };
 
+const isLocalHostLike = (url = "") => {
+  const s = String(url || "").toLowerCase();
+  return s.includes("localhost") || s.includes("127.0.0.1");
+};
+
+const resolveBaseUrlFromRequest = (req) => {
+  try {
+    const host = req.get("host");
+    if (host) return `${req.protocol}://${host}`;
+  } catch (_) {}
+  return env.appBaseUrl;
+};
+
 const createVnpayPaymentUrl = async ({ req, bookingId, amount, bankCode, locale }) => {
   if (!env.vnpayTmnCode || !env.vnpayHashSecret) {
     throw new ApiError(500, "VNPay config is missing");
@@ -32,14 +60,12 @@ const createVnpayPaymentUrl = async ({ req, bookingId, amount, bankCode, locale 
   const txnRef = `${Date.now()}${Math.floor(Math.random() * 1000)}`;
   const createDate = formatDateTime(new Date());
 
-  // Ưu tiên baseUrl theo request host (để WebView trên emulator dùng được 10.0.2.2 thay vì localhost)
-  const reqBaseUrl = (() => {
-    try {
-      const host = req.get("host");
-      if (host) return `${req.protocol}://${host}`;
-    } catch (_) {}
-    return env.appBaseUrl;
-  })();
+  // Nếu env đang để localhost mà request đến từ host khác (vd 10.0.2.2), ưu tiên host thực tế để WebView nhận được callback.
+  const reqBaseUrl = resolveBaseUrlFromRequest(req);
+  const returnUrl = isLocalHostLike(env.vnpayReturnUrl)
+    ? `${reqBaseUrl}/api/v1/payments/vnpay/return`
+    : env.vnpayReturnUrl;
+  const ipnUrl = isLocalHostLike(env.vnpayIpnUrl) ? `${reqBaseUrl}/api/v1/payments/vnpay/ipn` : env.vnpayIpnUrl;
 
   await prisma.paymentTransaction.create({
     data: {
@@ -65,15 +91,35 @@ const createVnpayPaymentUrl = async ({ req, bookingId, amount, bankCode, locale 
     vnp_Locale: locale || "vn",
     vnp_OrderInfo: `Thanh toan dat san ${booking.bookingCode}`,
     vnp_OrderType: "other",
-    vnp_ReturnUrl: `${reqBaseUrl}/api/v1/payments/vnpay/return`,
-    vnp_IpnUrl: `${reqBaseUrl}/api/v1/payments/vnpay/ipn`,
+    vnp_ReturnUrl: returnUrl,
+    // Không gửi vnp_IpnUrl trong request ký sang cổng thanh toán,
+    // nhiều cấu hình VNPay sandbox không dùng param này và dễ gây lệch chữ ký.
     vnp_TxnRef: txnRef,
   };
 
   if (bankCode) params.vnp_BankCode = bankCode;
 
   // Hash calculation must exclude vnp_SecureHash & vnp_SecureHashType
+  const signData = buildHashDataString(
+    Object.keys(params)
+      .sort()
+      .reduce((acc, k) => {
+        acc[k] = params[k];
+        return acc;
+      }, {})
+  );
   const secureHash = createSecureHash(params, env.vnpayHashSecret);
+
+  logVnpayDebug("create-sign", {
+    txnRef,
+    tmnCode: env.vnpayTmnCode,
+    returnUrl,
+    ipnUrl,
+    signData,
+    secureHash,
+    hashSecretMasked: maskSecret(env.vnpayHashSecret),
+  });
+
   const allParams = {
     ...params,
     vnp_SecureHashType: "SHA512",
@@ -99,7 +145,25 @@ const processVnpayCallback = async (queryParams) => {
   delete cloned.vnp_SecureHash;
   delete cloned.vnp_SecureHashType;
 
+  const signData = buildHashDataString(
+    Object.keys(cloned)
+      .sort()
+      .reduce((acc, k) => {
+        acc[k] = cloned[k];
+        return acc;
+      }, {})
+  );
   const verifyHash = createSecureHash(cloned, env.vnpayHashSecret);
+
+  logVnpayDebug("verify-sign", {
+    txnRef: cloned.vnp_TxnRef,
+    responseCode: cloned.vnp_ResponseCode,
+    signData,
+    receivedSecureHash: secureHash,
+    computedSecureHash: verifyHash,
+    hashSecretMasked: maskSecret(env.vnpayHashSecret),
+  });
+
   if (String(verifyHash).toLowerCase() !== String(secureHash).toLowerCase()) {
     throw new ApiError(400, "Invalid VNPay signature");
   }

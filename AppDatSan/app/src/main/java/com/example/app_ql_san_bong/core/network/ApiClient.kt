@@ -4,6 +4,7 @@ import com.example.app_ql_san_bong.BuildConfig
 import com.example.app_ql_san_bong.data.local.AuthStore
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
+import kotlinx.coroutines.runBlocking
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
@@ -25,9 +26,18 @@ object ApiClient {
             chain.proceed(withAuth)
         }
 
+        val authExpiryInterceptor = Interceptor { chain ->
+            val response = chain.proceed(chain.request())
+            if (response.code == 401 && authStore != null) {
+                runBlocking { authStore.clear() }
+            }
+            response
+        }
+
         val okHttp = OkHttpClient.Builder()
             .addInterceptor(logging)
             .addInterceptor(authInterceptor)
+            .addInterceptor(authExpiryInterceptor)
             .build()
 
         val moshi = Moshi.Builder()

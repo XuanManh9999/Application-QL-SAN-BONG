@@ -25,8 +25,9 @@ module.exports = {
   smtpUser: process.env.SMTP_USER,
   smtpPass: process.env.SMTP_PASS,
   smtpFrom: process.env.SMTP_FROM || "no-reply@football-booking.local",
-  vnpayTmnCode: stripWrappedQuotes(process.env.VNPAY_TMN_CODE),
-  vnpayHashSecret: stripWrappedQuotes(process.env.VNPAY_HASH_SECRET),
+  // VNPay: fallback cứng tạm thời nếu .env không load được
+  vnpayTmnCode: stripWrappedQuotes(process.env.VNPAY_TMN_CODE) || "TMJ7UWMF",
+  vnpayHashSecret: stripWrappedQuotes(process.env.VNPAY_HASH_SECRET) || "PCYPY7L159DSIEKYFRXWCAL6M503VYUH",
   vnpayUrl: stripWrappedQuotes(process.env.VNPAY_URL) || "https://sandbox.vnpayment.vn/paymentv2/vpcpay.html",
   vnpayReturnUrl: stripWrappedQuotes(process.env.VNPAY_RETURN_URL) || "http://localhost:4000/api/v1/payments/vnpay/return",
   vnpayIpnUrl: stripWrappedQuotes(process.env.VNPAY_IPN_URL) || "http://localhost:4000/api/v1/payments/vnpay/ipn",

@@ -28,16 +28,31 @@ interface UsersMeApi {
 
 data class VenueMiniDto(val id: String, val name: String, val address: String)
 data class PitchMiniDto(val id: String, val name: String, val pitchType: String, val venue: VenueMiniDto)
+
+data class PaymentTransactionMeDto(
+    val id: String,
+    val provider: String,
+    val status: String,
+    val amount: Double,
+    val txnRef: String,
+    val providerTxnNo: String?,
+    val paidAt: String?,
+    val createdAt: String
+)
+
 data class BookingMeDto(
     val id: String,
     val bookingCode: String,
     val bookingDate: String,
     val startTime: String,
     val endTime: String,
+    val subtotalPrice: Double? = null,
+    val discountAmount: Double? = null,
     val totalPrice: Double,
     val status: String,
     val paymentStatus: String,
-    val pitch: PitchMiniDto?
+    val pitch: PitchMiniDto?,
+    val paymentTransactions: List<PaymentTransactionMeDto> = emptyList()
 )
 
 interface BookingsMeApi {

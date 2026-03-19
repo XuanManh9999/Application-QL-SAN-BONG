@@ -55,6 +55,20 @@ class MainActivity : AppCompatActivity() {
                 })
             }
         }
+
+        // Auto-redirect when token is cleared (e.g. backend returns 401 because token expired)
+        lifecycleScope.launch {
+            authStore.accessTokenFlow.collect { token ->
+                val currentId = navController.currentDestination?.id
+                if (!token.isNullOrBlank()) return@collect
+                if (currentId != null && !authDestinations.contains(currentId)) {
+                    navController.navigate(R.id.loginFragment, null, navOptions {
+                        popUpTo(R.id.nav_graph) { inclusive = true }
+                        launchSingleTop = true
+                    })
+                }
+            }
+        }
     }
 }
 
